@@ -81,6 +81,37 @@ Round 4 adds the supply-tracker counters (all zero-tolerance):
                                    store's back that the verifier
                                    did not catch
 
+Round 5 adds the policy-registry counters (all zero-tolerance):
+  - policy_registration_mismatches
+                                   a planted event registered
+                                   under the wrong class, window
+                                   or stated effect, a second
+                                   registration pass that stored
+                                   anything, or a registration the
+                                   verifier cannot re-perform
+  - policy_impact_scope_mismatches
+                                   an impact note whose members
+                                   miss the hand-derived scope of
+                                   two planted events, a note the
+                                   verifier cannot re-perform, or
+                                   a future-window event whose
+                                   no-observed-scope statement is
+                                   wrong
+  - hypothetical_policy_leaks .... a hypothetical proposal that
+                                   earned an impact note, marked
+                                   the watch board, or listed
+                                   among the real events
+  - policy_supersession_failures . the hypothetical-to-real
+                                   chain: a broken supersedes
+                                   link, a proposal artefact
+                                   altered by its supersession,
+                                   or a head that did not move
+  - policy_board_marker_mismatches
+                                   board markers that are not
+                                   exactly the open-window real
+                                   events per series, or markers
+                                   inflating the alert counts
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -558,7 +589,202 @@ def main() -> int:
     if service.verify_position("DAP", "2025-10"):
         counters["position_tamper_undetected"] += 1
 
-    print("Round 1+2+3+4 evals — fertilizer market intelligence")
+    # --- Round 5: the policy registry ------------------------------
+    counters.update({
+        "policy_registration_mismatches": 0,
+        "policy_impact_scope_mismatches": 0,
+        "hypothetical_policy_leaks": 0,
+        "policy_supersession_failures": 0,
+        "policy_board_marker_mismatches": 0,
+    })
+    # Registration: the six recorded events under the pack —
+    # class, window, direction and driver derived by hand from
+    # the pack's mapping and window rule.
+    expected_registrations = {
+        "POL-2024-001": ("subsidy_rate_change", "2024-04", "2024-11", "up", "price"),
+        "POL-2024-002": ("price_control", "2024-06", "2024-11", "none", "price"),
+        "POL-2025-001": ("production_incentive", "2025-02", "2025-04", "up", "demand_rate"),
+        "POL-2025-002": ("subsidy_rate_change", "2025-08", "2025-11", "none", "price"),
+        "POL-2025-003": ("export_restriction", "2025-09", "2025-11", "down", "supply"),
+        "POL-2026-001": ("subsidy_rate_change", "2026-01", "2026-04", "none", "price"),
+    }
+    summary = service.register_policy_events(as_of)
+    if summary["registered"] != 6 or summary["events_total"] != 6:
+        counters["policy_registration_mismatches"] += 1
+    if service.register_policy_events(as_of)["registered"] != 0:
+        counters["policy_registration_mismatches"] += 1
+    facts_by_id = {f["event_id"]: f for f in store.policy_events()}
+    events_by_id = {e["event_id"]: e for e in service.list_policy_events()}
+    if set(events_by_id) != set(expected_registrations):
+        counters["policy_registration_mismatches"] += 1
+    for event_id, (klass, from_m, to_m, direction, driver) in \
+            expected_registrations.items():
+        event = events_by_id.get(event_id)
+        if event is None:
+            counters["policy_registration_mismatches"] += 1
+            continue
+        effect = event["stated_effect"]
+        if not (
+            event["event_class"] == klass
+            and event["effective_from_month"] == from_m
+            and event["effective_to_month"] == to_m
+            and effect["direction"] == direction
+            and effect["driver"] == driver
+            and effect["mechanism"] == facts_by_id[event_id]["expected_impact"]
+            and event["products"] == facts_by_id[event_id]["impacted_products"]
+            and event["hypothetical"] is False
+        ):
+            counters["policy_registration_mismatches"] += 1
+        if service.verify_policy_event(event["registry_id"]):
+            counters["policy_registration_mismatches"] += 1
+
+    # Impact scope, hand-derived for two events. The export
+    # restriction (DAP + phosphoric acid, 2025-09..2025-11):
+    # DAP cells in kharif + rabi 2025-26 across all districts,
+    # three price months on each of the two series, the three
+    # DAP position heads.
+    districts = {d["district_id"] for d in store.list_districts()}
+    note = service.policy_impact(events_by_id["POL-2025-003"]["registry_id"], as_of)
+    cells = {(c["district_id"], c["crop_year"], c["season"])
+             for c in note["demand_cells"]}
+    if cells != {
+        (d, y, s) for d in districts
+        for (y, s) in (("2025-26", "kharif"), ("2025-26", "rabi"))
+    } or len(note["demand_estimate_ids"]) != 24:
+        counters["policy_impact_scope_mismatches"] += 1
+    series = {(s["series_kind"], s["item"]): s["months"] for s in note["price_series"]}
+    if series != {
+        ("product", "DAP"): ["2025-09", "2025-10", "2025-11"],
+        ("feedstock", "PHOSPHORIC_ACID"): ["2025-09", "2025-10", "2025-11"],
+    }:
+        counters["policy_impact_scope_mismatches"] += 1
+    if note["position_ids"] != [
+        service.get_position("DAP", m)["position_id"]
+        for m in ("2025-09", "2025-10", "2025-11")
+    ] or note["status"] != "computed":
+        counters["policy_impact_scope_mismatches"] += 1
+    if service.verify_policy_impact(note["registry_id"]):
+        counters["policy_impact_scope_mismatches"] += 1
+    # The urea MRP notification (2024-06..2024-11): UREA cells
+    # in kharif + rabi 2024-25, six price months, six positions.
+    note_mrp = service.policy_impact(events_by_id["POL-2024-002"]["registry_id"], as_of)
+    cells = {(c["district_id"], c["crop_year"], c["season"])
+             for c in note_mrp["demand_cells"]}
+    if cells != {
+        (d, y, s) for d in districts
+        for (y, s) in (("2024-25", "kharif"), ("2024-25", "rabi"))
+    } or len(note_mrp["price_series"]) != 1 \
+            or note_mrp["price_series"][0]["point_count"] != 6 \
+            or len(note_mrp["position_ids"]) != 6:
+        counters["policy_impact_scope_mismatches"] += 1
+    if service.verify_policy_impact(note_mrp["registry_id"]):
+        counters["policy_impact_scope_mismatches"] += 1
+
+    # A real event whose window sits beyond the tracked data:
+    # the note must state no_observed_scope with empty members.
+    future = service.register_policy_event({
+        "event_id": "POL-EVAL-FUTURE", "event_class": "environmental_rule",
+        "title": "Application rule announced for a future season",
+        "detail": "A rule whose window sits beyond the tracked data.",
+        "effective_from_month": "2026-05", "effective_to_month": "2026-06",
+        "products": ["CHLORPYRIFOS"], "districts": [],
+        "direction": "down",
+        "mechanism": "Application of the active is restricted from May 2026.",
+        "hypothetical": False,
+        "source": "eval_event_register",
+        "registered_by": "eval.desk@kaveri.example",
+    }, as_of)
+    future_note = service.policy_impact(future["registry_id"], as_of)
+    if not (
+        future_note["status"] == "no_observed_scope"
+        and future_note["demand_estimate_ids"] == []
+        and future_note["price_series"] == []
+        and future_note["position_ids"] == []
+    ) or service.verify_policy_impact(future["registry_id"]):
+        counters["policy_impact_scope_mismatches"] += 1
+
+    # Hypothetical separation, then the supersession into a real
+    # event. The proposal shares the restriction's window and
+    # product, so any leak would be visible on the board and in
+    # the note tables.
+    hyp_spec = {
+        "event_id": "POL-EVAL-HYP", "event_class": "import_duty_change",
+        "title": "Proposed import duty revision on DAP (eval scenario)",
+        "detail": "A duty revision under discussion.",
+        "effective_from_month": "2025-09", "effective_to_month": "2025-11",
+        "products": ["DAP"], "districts": [],
+        "direction": "down",
+        "mechanism": "A lower duty would move the landed cost of DAP arrivals down.",
+        "source": "eval_event_register",
+        "registered_by": "eval.desk@kaveri.example",
+    }
+    proposal = service.register_policy_event({**hyp_spec, "hypothetical": True}, as_of)
+    try:
+        service.policy_impact(proposal["registry_id"], as_of)
+        counters["hypothetical_policy_leaks"] += 1  # a note was computed!
+    except ValueError:
+        pass
+    if store.list_policy_impact_notes(proposal["registry_id"]):
+        counters["hypothetical_policy_leaks"] += 1
+    if proposal["registry_id"] in [
+        e["registry_id"] for e in service.list_policy_events(hypothetical=False)
+    ]:
+        counters["hypothetical_policy_leaks"] += 1
+    if [e["event_id"] for e in service.list_policy_events(hypothetical=True)] != [
+        "POL-EVAL-HYP"
+    ]:
+        counters["hypothetical_policy_leaks"] += 1
+    board = {row["item"]: row for row in service.watch_board()}
+    if any(
+        m["event_id"] == "POL-EVAL-HYP"
+        for row in board.values() for m in row["policy_markers"]
+    ):
+        counters["hypothetical_policy_leaks"] += 1
+
+    # The chain: the proposal artefact must survive its
+    # supersession byte-identical, the head must move, and the
+    # real registration must earn the note the proposal could not.
+    snapshot = service.get_policy_event(proposal["registry_id"])
+    enacted = service.register_policy_event({
+        **hyp_spec,
+        "title": "Import duty revision on DAP (registered as enacted)",
+        "detail": "The duty revision is now on record as a real event.",
+        "mechanism": "A lower duty moves the landed cost of DAP arrivals down.",
+        "hypothetical": False,
+    }, as_of)
+    if enacted["supersedes"] != proposal["registry_id"]:
+        counters["policy_supersession_failures"] += 1
+    if service.get_policy_event(proposal["registry_id"]) != snapshot:
+        counters["policy_supersession_failures"] += 1
+    versions = service.policy_event_versions("POL-EVAL-HYP")
+    if [v["registry_id"] for v in versions] != [
+        proposal["registry_id"], enacted["registry_id"]
+    ]:
+        counters["policy_supersession_failures"] += 1
+    heads = {e["event_id"]: e for e in service.list_policy_events()}
+    if heads["POL-EVAL-HYP"]["registry_id"] != enacted["registry_id"]:
+        counters["policy_supersession_failures"] += 1
+    enacted_note = service.policy_impact(enacted["registry_id"], as_of)
+    if enacted_note["status"] != "computed" \
+            or len(enacted_note["demand_estimate_ids"]) != 24 \
+            or service.verify_policy_impact(enacted["registry_id"]):
+        counters["policy_supersession_failures"] += 1
+
+    # Board markers: at the reference month (2026-03, the latest
+    # tracked price month) only the rabi subsidy revision's
+    # window is open — on DAP and NPK — and the alert counts are
+    # exactly the alert states, markers or no markers.
+    board = {row["item"]: row for row in service.watch_board()}
+    for item, row in board.items():
+        expected = ["POL-2026-001"] if item in ("DAP", "NPK_10_26_26") else []
+        if [m["event_id"] for m in row["policy_markers"]] != expected \
+                or row["policy_marker_count"] != len(expected):
+            counters["policy_board_marker_mismatches"] += 1
+    open_alerts = len([a for a in service.list_alerts() if a["state"] != "closed"])
+    if sum(r["open_alert_count"] for r in board.values()) != open_alerts:
+        counters["policy_board_marker_mismatches"] += 1
+
+    print("Round 1+2+3+4+5 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
