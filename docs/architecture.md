@@ -71,6 +71,19 @@ artefact.
 - **Narrative figures are checked, not trusted.** The model port
   drafts words; the figure verifier admits the draft only if
   every figure in it belongs to the artefacts' figure set.
+- **Alerts exist only as firings.** An alert is produced by the
+  rule pack firing on a stored movement, and it carries the
+  triggering movement ids and figures on its face; the verifier
+  re-runs the firing function over the stored movements and
+  requires the alert to be among its output. There is no insert
+  path by which an alert could exist without its movement.
+- **Alert state is derived, never stored.** The alerts table has
+  no state column. State is the fold of the alert's acts —
+  acknowledgement (named actor, note) and closure (named actor,
+  reason from the pack's vocabulary) — each an insert-only
+  artefact, with the transitions enforced when an act is
+  recorded. Recording an act leaves the alert row itself
+  byte-identical; the eval gate grades exactly that.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -79,7 +92,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0002)
+## Data model (migrations 0001–0003)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -99,6 +112,14 @@ factor, delta, running value and the recorded inputs as JSON),
 rollups and total as JSON + columns), and `outlook_narratives`
 (the verified narrative text with the figure set it was checked
 against). Artefacts share the facts' insert-only discipline.
+
+Watch tables (0003): `price_movements` (one row per series-month:
+the two movement figures, the baseline window and fact ids as
+JSON, the rule-pack version and the fact fingerprint),
+`price_alerts` (one row per firing: rule, band, period month,
+triggering movement ids and figures as JSON — and deliberately
+no state column), and `alert_acts` (acknowledgements and
+closures: act kind, named actor, note or closing reason).
 
 ## Deployment
 

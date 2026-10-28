@@ -122,6 +122,53 @@ and never presents a stale figure as current.
   re-performance, total identity, consumption drift, rollup
   identity, partial naming, narrative figures, tamper detection.
 
+## What Round 3 adds
+
+- **Movements, computed in code** — for every product and
+  feedstock price series, a `PriceMovement` artefact per month:
+  the month-on-month change and the change against the trailing
+  baseline (the mean of the up-to-six preceding months), pinned
+  to the exact price facts consumed and to the alert rule pack
+  version. A month with too little history states no baseline
+  rather than a thin one.
+- **A versioned alert rule pack** — thresholds per series class
+  (product / feedstock) for the `watch` and `alert` bands of the
+  month-on-month and baseline rules, a **spike rule** (a single
+  month moving 20% or more), and a **sustained-move rule** (three
+  consecutive same-direction months adding up to a stated drift).
+  The spike is treated as an event: after it fires, the spike
+  rule stays quiet for that series through the pack's two-month
+  event window — the unwind is the same event, and it still fires
+  the ordinary movement rules on its own figures.
+- **Alerts are recorded acts of the engine** — an alert exists
+  only because a rule fired on a movement, and it carries the
+  triggering movement ids and the computed figures on its face;
+  the verifier re-performs every alert from the stored movements,
+  so an alert without its movement, or with a tampered band or
+  figure, is detectable. Firing is idempotent: re-running the
+  pass over unchanged prices stores and fires nothing new.
+- **Alert state is a fold of acts, never a field** — an alert is
+  open until a named person acknowledges it (with a note), and
+  closed when a named person closes it with a stated reason from
+  the pack's vocabulary. The alerts table has no state column;
+  state is derived from the insert-only act records, and the
+  state machine (no acknowledging an acknowledged alert, no
+  acting on a closed one) is enforced when an act is recorded.
+- **Watch views** — a per-series read (latest movement, open
+  alerts, the band those open alerts put the series in) and a
+  watch board ranking every series by band, computed from the
+  artefacts. Against the planted data the board is exact: DAP
+  sits at the alert band on the September 2025 spike, the
+  drifting series sit at watch, and the quiet series — natural
+  gas, phosphoric acid, sulphur, chlorpyrifos — fire nothing.
+- **Surfaces** — migration 0003 (movements, alerts, alert acts),
+  `POST /watch/run`, movement and alert reads with verify
+  endpoints, acknowledge/close acts, and `/watch` board reads on
+  the API, with the same surface on the CLI. The eval gate grows
+  the round-3 counters: missed planted alerts, false alerts,
+  duplicate alerts, state edits outside acts, alerts without
+  movements.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -181,18 +228,25 @@ SeaweedFS S3 gateway together.
   the season outlook with sum-of-parts rollups, and the
   figure-verified outlook narrative — migration 0002, API + CLI
   surfaces, demo walk, tests and eval counters.
+- **Built and gated in R3:** the price & feedstock watch —
+  computed movement artefacts per series-month, the versioned
+  alert rule pack (class thresholds, spike + event window,
+  sustained-move), alerts as recorded acts of the engine carrying
+  their triggering movements, acknowledgement/closure as named
+  acts with state derived (never stored), and the watch views —
+  migration 0003, API + CLI surfaces, demo walk, tests and eval
+  counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** price/feedstock alerts
-  (R3), the supply-gap tracker (R4), the policy registry views
-  (R5), competitor/share views (R6), field-signal weighting (R7),
-  the plain-language dashboard assembler (R8), scenario forks
-  (R9), the weekly brief (R10), the Postgres production smoke
-  (R11) and the console (R13).
+- **Not built yet (on the round map):** the supply-gap tracker
+  (R4), the policy registry views (R5), competitor/share views
+  (R6), field-signal weighting (R7), the plain-language dashboard
+  assembler (R8), scenario forks (R9), the weekly brief (R10),
+  the Postgres production smoke (R11) and the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -210,14 +264,16 @@ src/fertilizer_intelligence/
   generator.py       the seeded dataset generator + manifest
   demand_rules.py    the versioned demand rule pack (factors, windows)
   demand.py          the demand engine, verifiers, outlook narrator
+  alert_rules.py     the versioned alert rule pack (bands, spike, sustained)
+  movements.py       the movement engine, rule firing, alert verification
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + read/engine wiring
+  service.py         dataset loading + read/engine + watch wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0002 in sqlite + postgres dialects
+migrations/          0001-0003 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md
