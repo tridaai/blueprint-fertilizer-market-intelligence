@@ -179,6 +179,109 @@ def main() -> int:
           f"verification problems: "
           f"{service.verify_projection('DAP', '2025-26', 'rabi')}")
 
+    print("\n--- Round 5: the policy & subsidy event registry ---")
+    summary = service.register_policy_events("2026-04-15")
+    print(f"\nRegistration pass over the recorded policy facts: "
+          f"{summary['registered']} registered, "
+          f"{summary['already_registered']} already current, "
+          f"{summary['events_total']} events on the registry.")
+    events = {e["event_id"]: e for e in service.list_policy_events()}
+    for event in events.values():
+        effect = event["stated_effect"]
+        print(f"  {event['event_id']}  {event['event_class']:<22} "
+              f"{event['effective_from_month']}..{event['effective_to_month']}  "
+              f"driver {effect['driver']:<11} direction {effect['direction']:<5} "
+              f"scope {', '.join(event['products'])}")
+    again = service.register_policy_events("2026-04-15")
+    print(f"Second pass: {again['registered']} new registrations — "
+          "registration is idempotent.")
+
+    restriction = events["POL-2025-003"]
+    note = service.policy_impact(restriction["registry_id"], "2026-04-15")
+    print(f"\nImpact note for the export restriction ({note['note_id']}, "
+          f"status {note['status']}): the scope query names "
+          f"{len(note['demand_estimate_ids'])} demand cells, "
+          f"{sum(s['point_count'] for s in note['price_series'])} price "
+          f"points across {len(note['price_series'])} series, and "
+          f"{len(note['position_ids'])} supply positions — artefact ids, "
+          "computed from the store, not prose:")
+    for cell in note["demand_cells"][:2]:
+        print(f"  demand  {cell['district_id']} {cell['product']} "
+              f"{cell['crop_year']} {cell['season']} -> {cell['estimate_id']}")
+    print(f"  ... and {len(note['demand_cells']) - 2} more cells")
+    for series in note["price_series"]:
+        print(f"  prices  {series['series_kind']}/{series['item']}: "
+              f"months {', '.join(series['months'])}")
+    for position in note["positions"]:
+        print(f"  supply  {position['product']} {position['month']} "
+              f"-> {position['position_id']}")
+    print(f"  note verification problems: "
+          f"{service.verify_policy_impact(restriction['registry_id'])}")
+
+    proposal = service.register_policy_event({
+        "event_id": "POL-2026-HYP-001",
+        "event_class": "import_duty_change",
+        "title": "Proposed import duty revision on DAP (desk scenario)",
+        "detail": "A duty revision under discussion; registered as a "
+                  "proposal so its stated effect is on record.",
+        "effective_from_month": "2025-09", "effective_to_month": "2025-11",
+        "products": ["DAP"], "districts": [],
+        "direction": "down",
+        "mechanism": "A lower duty would move the landed cost of DAP "
+                     "arrivals down over the kharif window.",
+        "hypothetical": True,
+        "source": "desk_scenario_register",
+        "registered_by": "strategy.desk@kaveri.example",
+    }, "2026-04-15")
+    print(f"\nA proposed duty change is registered as hypothetical "
+          f"({proposal['registry_id']}): listed with the proposals "
+          f"({len(service.list_policy_events(hypothetical=True))}), absent "
+          f"from the real events "
+          f"({len(service.list_policy_events(hypothetical=False))}).")
+    try:
+        service.policy_impact(proposal["registry_id"], "2026-04-15")
+        print("  ERROR: a hypothetical earned an impact note")
+    except ValueError as exc:
+        print(f"  Its impact note is refused: {exc}")
+    print(f"  Impact notes stored for it: "
+          f"{len(service.store.list_policy_impact_notes(proposal['registry_id']))}")
+
+    markers_before = {
+        row["item"]: [m["event_id"] for m in row["policy_markers"]]
+        for row in service.watch_board()
+    }
+    print(f"  Board markers stay with the real events only — DAP carries "
+          f"{markers_before['DAP']}, NPK carries "
+          f"{markers_before['NPK_10_26_26']} (the rabi subsidy revision, "
+          "whose window is open at the board's reference month); the "
+          "proposal marks nothing, and no marker is counted as an alert.")
+
+    enacted = service.register_policy_event({
+        "event_id": "POL-2026-HYP-001",
+        "event_class": "import_duty_change",
+        "title": "Import duty revision on DAP (registered as enacted)",
+        "detail": "The duty revision is now on record as a real event; "
+                  "this registration supersedes the proposal by link.",
+        "effective_from_month": "2025-09", "effective_to_month": "2025-11",
+        "products": ["DAP"], "districts": [],
+        "direction": "down",
+        "mechanism": "A lower duty moves the landed cost of DAP "
+                     "arrivals down over the kharif window.",
+        "hypothetical": False,
+        "source": "desk_scenario_register",
+        "registered_by": "strategy.desk@kaveri.example",
+    }, "2026-04-16")
+    print(f"\nRegistered again as a real event, it supersedes the proposal "
+          f"by link (supersedes set: "
+          f"{enacted['supersedes'] == proposal['registry_id']}); the "
+          "proposal artefact itself is unchanged — registrations are "
+          "insert-only, so a hypothetical flag is never flipped in place.")
+    enacted_note = service.policy_impact(enacted["registry_id"], "2026-04-16")
+    print(f"Now it earns an impact note: status {enacted_note['status']}, "
+          f"{len(enacted_note['demand_estimate_ids'])} demand cells, "
+          f"{len(enacted_note['position_ids'])} positions — the same "
+          "window and product scope the restriction's note named.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
