@@ -964,6 +964,82 @@ class MarketStore:
         )
         return [self._field_assessment_row(row) for row in rows]
 
+    # -- dashboard specs & assemblies (R8, insert-only) ---------------
+
+    def insert_dashboard_spec(self, spec: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO dashboard_specs (spec_id, fingerprint, question,"
+            " asked_by, role, name, saved_by, as_of, rules_version, payload)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (spec["spec_id"], spec["fingerprint"], spec["question"],
+             spec["asked_by"], spec.get("role"), spec.get("name"),
+             spec.get("saved_by"), spec["as_of"], spec["rules_version"],
+             json.dumps(spec, sort_keys=True)),
+        )
+        self._conn.commit()
+
+    def _spec_row(self, row) -> dict | None:
+        if row is None:
+            return None
+        record = dict(row)
+        payload = json.loads(record.pop("payload"))
+        payload.update(record)
+        return payload
+
+    def get_dashboard_spec(self, spec_id: str) -> dict | None:
+        return self._spec_row(self._conn.execute(
+            "SELECT * FROM dashboard_specs WHERE spec_id = ?", (spec_id,),
+        ).fetchone())
+
+    def dashboard_spec_by_fingerprint(self, fingerprint: str) -> dict | None:
+        return self._spec_row(self._conn.execute(
+            "SELECT * FROM dashboard_specs WHERE fingerprint = ?",
+            (fingerprint,),
+        ).fetchone())
+
+    def dashboard_specs(self, name: str | None = None,
+                        saved_by: str | None = None) -> list[dict]:
+        rows = self._conn.execute("SELECT * FROM dashboard_specs").fetchall()
+        out = [self._spec_row(r) for r in rows]
+        if name is not None:
+            out = [s for s in out if s.get("name") == name]
+        if saved_by is not None:
+            out = [s for s in out if s.get("saved_by") == saved_by]
+        return out
+
+    def insert_dashboard_assembly(self, assembly: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO dashboard_assemblies (assembly_id, fingerprint,"
+            " spec_id, supersedes, assembled_on, payload)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (assembly["assembly_id"], assembly["fingerprint"],
+             assembly["spec_id"], assembly.get("supersedes"),
+             assembly["assembled_on"],
+             json.dumps(assembly, sort_keys=True)),
+        )
+        self._conn.commit()
+
+    def _assembly_row(self, row) -> dict | None:
+        if row is None:
+            return None
+        record = dict(row)
+        payload = json.loads(record.pop("payload"))
+        payload.update(record)
+        return payload
+
+    def get_dashboard_assembly(self, assembly_id: str) -> dict | None:
+        return self._assembly_row(self._conn.execute(
+            "SELECT * FROM dashboard_assemblies WHERE assembly_id = ?",
+            (assembly_id,),
+        ).fetchone())
+
+    def dashboard_assemblies(self, spec_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM dashboard_assemblies WHERE spec_id = ?"
+            " ORDER BY assembled_on, assembly_id", (spec_id,),
+        ).fetchall()
+        return [self._assembly_row(r) for r in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
