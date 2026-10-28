@@ -17,8 +17,27 @@ Zero-tolerance counters:
   - duplicate_load_accepted ...... a second dataset load was accepted
                                    (the store is insert-only)
 
-Later rounds extend this gate: demand accuracy (R2), alert truth
-(R3), supply gaps (R4), spike/delay grading depth (R12).
+Round 2 adds the demand-engine counters (all zero-tolerance):
+  - estimate_reperformance_failures  a stored estimate the verifier
+                                   cannot re-perform from its own
+                                   recorded inputs
+  - estimate_total_mismatch ...... total != base + contribution deltas
+  - engine_consumption_drift ..... base x soil x monsoon drifts from
+                                   the stored consumption figure
+  - rollup_part_mismatch ......... an outlook rollup that is not the
+                                   sum of its member estimates
+  - partial_naming_gaps .......... a partial estimate that fails to
+                                   name its missing drivers (or a
+                                   complete-year estimate gone partial)
+  - narrative_figure_violations_accepted
+                                   a narrative figure not in the
+                                   artefacts, accepted anywhere
+  - estimate_tamper_undetected ... a stored line/total altered behind
+                                   the store's back that the verifier
+                                   did not catch
+
+Later rounds extend this gate: alert truth (R3), supply gaps (R4),
+spike/delay grading depth (R12).
 """
 
 from __future__ import annotations
@@ -123,7 +142,122 @@ def main() -> int:
     except RuntimeError:
         pass
 
-    print("Round 1 evals — fertilizer market intelligence")
+    # --- Round 2: the demand engine -----------------------------------
+    import sqlite3
+
+    from fertilizer_intelligence.demand import NarrativeRefused, OutlookNarrator
+    from fertilizer_intelligence.modelport import ModelReply
+
+    counters.update({
+        "estimate_reperformance_failures": 0,
+        "estimate_total_mismatch": 0,
+        "engine_consumption_drift": 0,
+        "rollup_part_mismatch": 0,
+        "partial_naming_gaps": 0,
+        "narrative_figure_violations_accepted": 0,
+        "estimate_tamper_undetected": 0,
+    })
+    as_of = "2026-04-15"
+    outlooks = {}
+    for year in manifest["crop_years"]:
+        for season in ("kharif", "rabi"):
+            outlooks[(year, season)] = service.demand_outlook(year, season, as_of)
+
+    consumption = {
+        (c["district_id"], c["crop_year"], c["season"], c["product"]): c["quantity_tonnes"]
+        for c in store.consumption_facts()
+    }
+    supply_products = {r["product"] for r in store.supply_facts()}
+    for est in store.list_estimates():
+        lines = store.estimate_contributions(est["estimate_id"])
+        if service.verify_estimate(est["estimate_id"]):
+            counters["estimate_reperformance_failures"] += 1
+        delta_sum = est["base_tonnes"] + sum(
+            line["delta_tonnes"] for line in lines if line["driver"] != "base_area_rates"
+        )
+        if abs(delta_sum - est["total_tonnes"]) > 0.002:
+            counters["estimate_total_mismatch"] += 1
+        # Base x soil x monsoon is the generator's derivation; the
+        # engine's pre-price value must track the stored figure.
+        monsoon_line = next(l for l in lines if l["driver"] == "monsoon_deviation")
+        key = (est["district_id"], est["crop_year"], est["season"], est["product"])
+        if abs(monsoon_line["value_after_tonnes"] - consumption[key]) > 0.05:
+            counters["engine_consumption_drift"] += 1
+        # Partial honesty: the first crop year names its missing
+        # drivers; the second is complete throughout.
+        if est["crop_year"] == manifest["crop_years"][0]:
+            if est["status"] != "partial" or "price_elasticity" not in est["missing_drivers"]:
+                counters["partial_naming_gaps"] += 1
+            if est["product"] in supply_products and "carry_in_stock" not in est["missing_drivers"]:
+                counters["partial_naming_gaps"] += 1
+            if est["product"] not in supply_products and "carry_in_stock" in est["missing_drivers"]:
+                counters["partial_naming_gaps"] += 1
+        elif est["status"] != "complete" or est["missing_drivers"]:
+            counters["partial_naming_gaps"] += 1
+
+    for outlook in outlooks.values():
+        if service.verify_outlook(outlook["outlook_id"]):
+            counters["rollup_part_mismatch"] += 1
+        members = [store.get_estimate(eid) for eid in outlook["estimate_ids"]]
+        for product, rolled in outlook["product_rollups"].items():
+            parts = sum(m["total_tonnes"] for m in members if m["product"] == product)
+            if abs(rolled - parts) > 0.01:
+                counters["rollup_part_mismatch"] += 1
+
+    # Narratives: the honest draft verifies; a wrong-figure draft
+    # is refused and stores nothing; a stored narrative altered
+    # behind the store's back is caught on re-verification.
+    narrative = service.draft_outlook_narrative("2025-26", "kharif", as_of)
+    if service.verify_narrative(narrative["narrative_id"]):
+        counters["narrative_figure_violations_accepted"] += 1
+
+    class _WrongFigure:
+        profile_name = "stub"
+        model_name = "stub-wrong-figure"
+
+        def complete(self, system, prompt):
+            return ModelReply(
+                text="Total estimated demand is 999999.99 tonnes.",
+                profile=self.profile_name, model=self.model_name,
+                input_tokens=0, output_tokens=0,
+            )
+
+    outlook = outlooks[("2025-26", "kharif")]
+    stored_before = len(store.list_narratives(outlook["outlook_id"]))
+    try:
+        OutlookNarrator(store, _WrongFigure()).draft(outlook, as_of)
+        counters["narrative_figure_violations_accepted"] += 1  # accepted!
+    except NarrativeRefused:
+        pass
+    if len(store.list_narratives(outlook["outlook_id"])) != stored_before:
+        counters["narrative_figure_violations_accepted"] += 1
+
+    raw = sqlite3.connect(settings.sqlite_path)
+    raw.execute(
+        "UPDATE outlook_narratives SET text = 'Total estimated demand is 1.00 tonnes.' "
+        "WHERE narrative_id = ?",
+        (narrative["narrative_id"],),
+    )
+    raw.commit()
+    if not service.verify_narrative(narrative["narrative_id"]):
+        counters["narrative_figure_violations_accepted"] += 1  # tamper went undetected
+    raw.execute(
+        "UPDATE outlook_narratives SET text = ? WHERE narrative_id = ?",
+        (narrative["text"], narrative["narrative_id"]),
+    )
+    # Tamper with one estimate's stored total: the verifier must
+    # catch it; then restore and confirm it verifies clean again.
+    victim = store.list_estimates()[0]
+    raw.execute(
+        "UPDATE demand_estimates SET total_tonnes = total_tonnes + 25 WHERE estimate_id = ?",
+        (victim["estimate_id"],),
+    )
+    raw.commit()
+    raw.close()
+    if not service.verify_estimate(victim["estimate_id"]):
+        counters["estimate_tamper_undetected"] += 1
+
+    print("Round 1+2 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
