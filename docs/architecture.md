@@ -46,6 +46,18 @@ stored facts — production and arrival facts from 0001, demand
 from the R2 outlooks — storing each as an artefact (migration
 0004) with its own re-performance verifier.
 
+Round 5 adds the policy registry behind the same ports:
+`policy_rules.py` states the pack once (the class vocabulary
+with each class's driver and engine linkage, the recorded-kind
+mapping, the planted directions, the window derivation), and
+`policy.py` registers the recorded policy facts as artefacts
+and computes impact notes by a single scope query over the
+demand, price and supply artefacts (migration 0005), each with
+its own re-performance verifier. The service ensures the
+outlooks and position chains a note can name before the query
+runs, and lays the registry's current, real, open-window
+events onto the watch board as typed markers.
+
 Later rounds add, behind the same ports: the alert recorder, the
 dashboard assembler (AgentSQL-shaped: natural language → governed
 artefact selection → static page), scenario forks, and the
@@ -115,6 +127,31 @@ artefact.
   and a superseding projection stores the named difference
   against its predecessor; the verifier re-derives that
   difference and requires it to match.
+- **A policy effect is stated data, never an engine input.**
+  A registry event's effect (direction, driver, mechanism,
+  linkage) is recorded on the artefact and echoed by its
+  impact note, but no computation consumes it: the linkage
+  names the engine surface a reader should inspect, it does
+  not move a number. A registration whose driver disagrees
+  with its class's stated driver is refused at the desk.
+- **Impact is a scope query, not a narrative.** An impact
+  note is the output of one stated query over stored
+  artefacts (estimate heads, price points, position heads
+  inside the window and scope), and the verifier re-runs the
+  same query and requires the same member sets. An empty
+  result is a stated status (`no_observed_scope`), never an
+  omitted note.
+- **Hypotheticals are separated by construction.** A
+  proposed policy is a registration with the flag set: the
+  note computation refuses it, the board marker pass skips
+  it, and the listings filter on it. Because registrations
+  are insert-only, the only path from proposal to real event
+  is a superseding registration — the proposal artefact
+  remains on record, byte-identical.
+- **Markers are not alerts.** A watch-board policy marker is
+  a registry reference laid on a series row; it has its own
+  count field and no path into the alert counts, the band,
+  or any alert state — the eval gate grades the separation.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -123,7 +160,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0004)
+## Data model (migrations 0001–0005)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -165,6 +202,18 @@ id, a `supersedes` link and the payload), and
 status, opening/closing, a `supersedes` link and the payload,
 which carries the projected months and the pinned assumption
 set). All four are insert-only, like every artefact table here.
+
+Registry tables (0005): `policy_registry_events` (one row per
+registration: the event id and its recorded-fact link, the
+class, window months, scope lists and the hypothetical flag as
+columns; the stated effect, detail and provenance in the JSON
+payload, with a `supersedes` link and the fact fingerprint),
+and `policy_impact_notes` (one row per note: the registry id
+it belongs to, its status and member counts as columns, the
+member artefact ids and cells in the payload, a `supersedes`
+link). Both are insert-only; the current registration of an
+event is the head of its supersedes chain, never a flagged
+row.
 
 ## Deployment
 

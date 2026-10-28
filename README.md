@@ -233,6 +233,72 @@ and never presents a stale figure as current.
   mismatches, projection supersession failures, undetected
   position tampering.
 
+## What Round 5 adds
+
+- **The policy & subsidy event registry** — the recorded
+  policy events become first-class `RegisteredPolicyEvent`
+  artefacts under a versioned policy pack: a class from the
+  pack vocabulary (subsidy rate change, price control, import
+  duty change, export restriction, production incentive,
+  environmental rule), an effective window in whole months
+  derived from the event's date by the pack's stated rule
+  (the window opens at the event's month and closes at the
+  end of the season it lands in), product/district scope as
+  recorded — an empty district list means market-wide, never
+  silently narrowed — and provenance (source label + the date
+  the event was recorded). The recorded kinds map onto the
+  registry classes in exactly one place, the pack.
+- **Stated effects as structured data** — each event carries
+  its expected effect as data, never commentary: a direction
+  (up / down / none — `none` is a positive statement, e.g. a
+  price held), the driver it touches (demand rate, price, or
+  supply), the mechanism in the words recorded at
+  registration, and the pack's linkage naming the engine
+  surface the effect would move — a subsidy revision names
+  the demand pack's price-elasticity parameter; an import
+  duty names the supply tracker's import-arrivals line at
+  its landed-cost aspect. The linkage tells a reader where to
+  look; no engine consumes an effect as an input, so a policy
+  statement never moves a number by itself.
+- **Impact notes, computed by query** — per current registry
+  event, a `PolicyImpactNote` names exactly which stored
+  artefacts fall inside the event's window and scope: the
+  head demand estimates per district × season cell, the
+  price series points (product and feedstock alike — the
+  planted export restriction names phosphoric acid alongside
+  DAP), and the head supply positions. The September 2025
+  export restriction's note names 24 demand cells, six price
+  points across two series, and the three DAP positions of
+  its window. An event whose scope matches nothing stored —
+  a rule announced for a season beyond the tracked data —
+  earns a note with status `no_observed_scope` and empty
+  lists: the absence is stated, not hidden.
+- **Hypotheticals stay hypothetical** — a proposed policy is
+  registered with the hypothetical flag: listed separately
+  with its stated effect only, refused an impact note, and
+  never marking the watch board. Registrations are
+  insert-only, so the flag cannot be flipped on a stored
+  artefact; when a proposal becomes real, the desk registers
+  it again under the same event id and the new registration
+  supersedes the proposal by link, which stays byte-identical.
+- **Watch-board policy markers** — when a real event's window
+  is open at the board's reference month (the latest tracked
+  price month), the board surfaces it on the rows of the
+  series it scopes to, as a typed policy marker with its own
+  count — alongside the price alerts, never counted as one.
+  At the current reference month only the rabi subsidy
+  revision's window is open, marking the DAP and NPK rows.
+- **Surfaces** — migration 0005 (registry events, impact
+  notes), `POST /policy-registry/register-facts`,
+  `POST /policy-registry/events`, registration reads with
+  verify endpoints and impact-note compute/read/verify on
+  the API, and `policy-register` / `policy-events` /
+  `policy-event` / `policy` / `policy-impact` with their
+  verify commands on the CLI. The eval gate grows the
+  round-5 counters: registration mismatches, impact-scope
+  mismatches, hypothetical leaks, supersession failures,
+  board marker mismatches.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -309,17 +375,27 @@ SeaweedFS S3 gateway together.
   positions with pinned assumption sets and named slip/landing
   changes — migration 0004, API + CLI surfaces, demo walk,
   tests and eval counters.
+- **Built and gated in R5:** the policy & subsidy event
+  registry — the recorded events promoted to artefacts under
+  the versioned policy pack (class vocabulary, stated effects
+  with engine linkages, windows derived by the pack's rule,
+  scope as recorded), impact notes computed by scope query
+  over the demand/price/supply artefacts with the
+  `no_observed_scope` statement, hypothetical proposals held
+  apart (no note, no board marker, real only by supersession),
+  and policy markers on the watch board — migration 0005,
+  API + CLI surfaces, demo walk, tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the policy registry
-  views (R5), competitor/share views (R6), field-signal
-  weighting (R7), the plain-language dashboard assembler (R8),
-  scenario forks (R9), the weekly brief (R10), the Postgres
-  production smoke (R11) and the console (R13).
+- **Not built yet (on the round map):** competitor/share
+  views (R6), field-signal weighting (R7), the plain-language
+  dashboard assembler (R8), scenario forks (R9), the weekly
+  brief (R10), the Postgres production smoke (R11) and the
+  console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -341,14 +417,16 @@ src/fertilizer_intelligence/
   movements.py       the movement engine, rule firing, alert verification
   supply_rules.py    the versioned supply pack (identity, spread, gap bands)
   supply.py          positions, gaps, projections and their verifiers
+  policy_rules.py    the versioned policy pack (classes, linkages, windows)
+  policy.py          registry events, impact notes and their verifiers
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply wiring
+  service.py         dataset loading + engine/watch/supply/policy wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0004 in sqlite + postgres dialects
+migrations/          0001-0005 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md
