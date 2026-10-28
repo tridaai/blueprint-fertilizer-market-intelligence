@@ -134,6 +134,35 @@ class FieldAssessmentRequest(BaseModel):
     as_of: str | None = None
 
 
+class ScenarioRequest(BaseModel):
+    kind: str
+    scope: dict
+    levers: list[dict]
+    created_by: str
+    name: str | None = None
+    as_of: str | None = None
+
+
+class ScenarioAskRequest(BaseModel):
+    question: str
+    asked_by: str
+    name: str | None = None
+
+
+class PlanningOptionsRequest(BaseModel):
+    base_artefact_id: str
+    fork_ids: list[str]
+    created_by: str
+    name: str | None = None
+
+
+class AdoptionRequest(BaseModel):
+    fork_id: str | None = None
+    adopted_by: str
+    as_of: str
+    note: str | None = None
+
+
 class PolicyEventRequest(BaseModel):
     event_id: str
     event_class: str
@@ -913,6 +942,102 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 role, asked_by, as_of or date.today().isoformat())
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # -- scenario forks & planning options (R9) ----------------
+
+    @app.post("/scenarios")
+    def create_scenario(body: ScenarioRequest) -> dict:
+        try:
+            return service.create_scenario(
+                body.kind, body.scope, body.levers, body.created_by,
+                name=body.name, as_of=body.as_of)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/scenarios/ask")
+    def ask_scenario(body: ScenarioAskRequest) -> dict:
+        try:
+            return service.ask_scenario(
+                body.question, body.asked_by, name=body.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/scenarios")
+    def list_scenarios(
+        base_artefact_id: str | None = None,
+    ) -> list[dict]:
+        return service.list_scenarios(base_artefact_id)
+
+    @app.get("/scenarios/{fork_id}")
+    def get_scenario(fork_id: str) -> dict:
+        fork = service.get_scenario(fork_id)
+        if fork is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such scenario fork: {fork_id}")
+        return fork
+
+    @app.get("/scenarios/{fork_id}/verify")
+    def verify_scenario(fork_id: str) -> dict:
+        try:
+            return service.verify_scenario(fork_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/planning-options")
+    def build_planning_options(body: PlanningOptionsRequest) -> dict:
+        try:
+            return service.build_planning_options(
+                body.base_artefact_id, body.fork_ids, body.created_by,
+                name=body.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/planning-options")
+    def list_planning_options(
+        base_artefact_id: str | None = None,
+    ) -> list[dict]:
+        return service.list_planning_options(base_artefact_id)
+
+    @app.get("/planning-options/{options_id}")
+    def get_planning_options(options_id: str) -> dict:
+        options = service.get_planning_options(options_id)
+        if options is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such planning options: {options_id}")
+        return options
+
+    @app.get("/planning-options/{options_id}/verify")
+    def verify_planning_options(options_id: str) -> dict:
+        try:
+            return service.verify_planning_options(options_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/planning-options/{options_id}/adopt")
+    def adopt_option(options_id: str, body: AdoptionRequest) -> dict:
+        try:
+            return service.adopt_option(
+                options_id, body.fork_id, body.adopted_by, body.as_of,
+                note=body.note)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/planning-options/{options_id}/adoption")
+    def current_adoption(options_id: str) -> dict:
+        adoption = service.current_adoption(options_id)
+        if adoption is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no adoption recorded for {options_id}")
+        return adoption
+
+    @app.get("/adoptions/{adoption_id}/verify")
+    def verify_adoption(adoption_id: str) -> dict:
+        try:
+            return service.verify_adoption(adoption_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
 

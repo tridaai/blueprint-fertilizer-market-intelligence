@@ -38,6 +38,11 @@ The disciplines the pack states once, for every dashboard:
   names the artefact it came from, that artefact's as-of,
   and its badges (partial, stale, review state). A figure
   without lineage is a defect the eval gate counts.
+- **Scenarios render only when named (R9).** A dashboard
+  of record carries no hypothetical figures. A scenario
+  panel exists only when the question names a stored fork,
+  and every figure on it is badged as a scenario — an
+  unbadged scenario figure is a defect the verifier names.
 - **Role defaults are specs, not code.** The dashboards a
   regional head, a national planner and leadership open by
   default are stated below as panel lists and are built
@@ -64,6 +69,7 @@ PANEL_KINDS = (
     "market_share",
     "share_movement",
     "field_signals",
+    "scenario",
     "gap",
 )
 
@@ -78,6 +84,7 @@ PANEL_SCOPE = {
     "market_share": ("district_id", "product", "crop_year", "season"),
     "share_movement": ("district_id", "product", "season"),
     "field_signals": ("district_id", "product", "crop_year", "season"),
+    "scenario": ("fork_id",),
     "gap": ("subject", "needed_data"),
 }
 
@@ -96,6 +103,7 @@ PANEL_ENGINE = {
     "market_share": "share engine (R6)",
     "share_movement": "share engine (R6)",
     "field_signals": "field-signal assessment (R7)",
+    "scenario": "scenario forks (R9)",
     "gap": "none — no governed engine answers this part",
 }
 
@@ -141,6 +149,13 @@ GAP_CROP_NOT_PRODUCT = (
 GAP_REFUSED_PROPOSAL = (
     "the proposed panel was refused: {reason} — no governed panel "
     "was substituted and no figure was invented for this part"
+)
+GAP_SCENARIO_UNNAMED = (
+    "a scenario renders on a dashboard only when the question names "
+    "a stored fork — hypothetical figures are never carried unnamed "
+    "on a dashboard of record. Stored scenarios: {names}. Naming one "
+    "(by its name or its SCN id) renders it, badged as a scenario on "
+    "every figure"
 )
 
 # -- role default dashboards, stated as data -----------------------------

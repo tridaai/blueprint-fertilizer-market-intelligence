@@ -230,6 +230,28 @@ def _find_month(low: str, crop_year: str) -> str | None:
     return None
 
 
+def _find_scenario(store, clause: str) -> dict | None:
+    """The stored scenario fork a clause names — by its
+    SCN id, or by its name appearing in the clause (the
+    longest matching name wins, so the most specific
+    reference binds). A clause that names no stored fork
+    returns None: dashboards of record render no scenario
+    that was not explicitly named."""
+    match = re.search(r"SCN-[0-9a-f]{10}", clause)
+    if match:
+        fork = store.get_scenario_fork(match.group(0))
+        if fork is not None:
+            return fork
+    low = clause.lower()
+    best = None
+    for fork in store.list_scenario_forks():
+        name = (fork.get("name") or "").strip().lower()
+        if name and name in low:
+            if best is None or len(name) > len(best.get("name") or ""):
+                best = fork
+    return best
+
+
 def _gap_panel(panel_no: int, clause: str, needed: str, rule: str) -> SpecPanel:
     return SpecPanel(
         panel_no=panel_no, kind="gap",
@@ -281,6 +303,11 @@ def _panel_title(store, kind: str, scope: dict) -> str:
     if kind == "field_signals":
         return (f"Field signals — {scope['product']} in {district_name()}, "
                 f"{scope['season']} {scope['crop_year']}")
+    if kind == "scenario":
+        fork = store.get_scenario_fork(scope["fork_id"])
+        label = (fork.get("name") or scope["fork_id"]) if fork \
+            else scope["fork_id"]
+        return f"Scenario — {label} (hypothetical)"
     return kind
 
 
@@ -351,7 +378,22 @@ def parse_question_grammar(store, question: str) -> tuple[list[SpecPanel], dict]
                 pack.GAP_MISSING_SCOPE.format(missing=" and ".join(names)),
                 "grammar:gap_missing_scope")
 
-        if "monsoon" in low:
+        scenario_fork = _find_scenario(store, clause)
+        if scenario_fork is not None:
+            rules_used.append("grammar:scenario")
+            panels.append(_panel(panel_no, "scenario", {
+                "fork_id": scenario_fork["fork_id"]},
+                store, "grammar:scenario"))
+        elif "scenario" in low:
+            rules_used.append("grammar:gap_scenario_unnamed")
+            names = ", ".join(
+                (f.get("name") or f["fork_id"])
+                for f in store.list_scenario_forks()) or "none stored yet"
+            panels.append(_gap_panel(
+                panel_no, clause,
+                pack.GAP_SCENARIO_UNNAMED.format(names=names),
+                "grammar:gap_scenario_unnamed"))
+        elif "monsoon" in low:
             rules_used.append("grammar:gap_monsoon")
             panels.append(_gap_panel(
                 panel_no, clause,
@@ -476,7 +518,10 @@ watch_board{}; supply_position{product, month}; \
 supply_gap{product, crop_year, season}; policy_events{product?}; \
 market_share{district_id, product, crop_year, season}; \
 share_movement{district_id, product, season}; \
-field_signals{district_id, product, crop_year, season}. Products: \
+field_signals{district_id, product, crop_year, season}; \
+scenario{fork_id} (only a fork_id that names a stored scenario \
+fork — propose it only when the question explicitly names that \
+scenario). Products: \
 UREA, DAP, NPK_10_26_26, MOP, GLYPHOSATE, CHLORPYRIFOS. Seasons: \
 kharif, rabi. District ids look like DST-LUD. Never invent a panel \
 kind outside this list.
@@ -517,6 +562,11 @@ def _validate_proposal(store, proposal: PanelProposal,
             return None, "price_watch series_kind must be product or feedstock"
         if scope["item"] not in items:
             return None, f"price item {scope['item']!r} is not tracked"
+    if kind == "scenario" and \
+            store.get_scenario_fork(scope["fork_id"]) is None:
+        return None, (f"scenario fork {scope['fork_id']!r} is not a "
+                      "stored fork — a scenario panel binds a fork "
+                      "that exists")
     panel = SpecPanel(
         panel_no=panel_no, kind=kind,
         title=proposal.title or _panel_title(store, kind, scope),
@@ -726,6 +776,18 @@ def _resolve_artefacts(service, kind: str, scope: dict, as_of: str) -> dict:
         return {"assessment": service.field_signal_assessment(
             scope["district_id"], scope["product"], scope["crop_year"],
             scope["season"], as_of)}
+    if kind == "scenario":
+        fork = store.get_scenario_fork(scope["fork_id"])
+        if fork is None:
+            raise ValueError(
+                f"scenario fork {scope['fork_id']} is not in the store")
+        if fork["kind"] == "demand_estimate":
+            base = store.get_estimate(fork["base_artefact_id"])
+            base = {**base, "contributions": store.estimate_contributions(
+                base["estimate_id"])}
+        else:
+            base = store.get_projection(fork["base_artefact_id"])
+        return {"fork": fork, "base": base}
     raise ValueError(f"no resolver for panel kind: {kind}")
 
 
@@ -759,6 +821,9 @@ def _artefact_ids(kind: str, scope: dict, artefacts: dict) -> list[str]:
         return [artefacts["movement"]["movement_id"]]
     if kind == "field_signals":
         return [artefacts["assessment"]["assessment_id"]]
+    if kind == "scenario":
+        return [artefacts["fork"]["fork_id"],
+                artefacts["fork"]["base_artefact_id"]]
     return []
 
 
@@ -851,6 +916,24 @@ def _fetch_artefacts(store, kind: str, scope: dict,
                           f"field assessment {ids[0]}")
         return ({"assessment": assessment}, problems) \
             if assessment else (None, problems)
+    if kind == "scenario":
+        fork = need(store.get_scenario_fork(ids[0]),
+                    f"scenario fork {ids[0]}")
+        if fork is None:
+            return None, problems
+        if fork["kind"] == "demand_estimate":
+            base = need(store.get_estimate(ids[1]),
+                        f"base estimate {ids[1]}")
+            if base is None:
+                return None, problems
+            base = {**base, "contributions":
+                    store.estimate_contributions(ids[1])}
+        else:
+            base = need(store.get_projection(ids[1]),
+                        f"base projection {ids[1]}")
+            if base is None:
+                return None, problems
+        return {"fork": fork, "base": base}, problems
     return None, [f"no verifier fetch for panel kind: {kind}"]
 
 
@@ -1106,6 +1189,56 @@ def extract_panel(store, kind: str, scope: dict,
                 "badged, never hidden")
         return figures, rows, notes
 
+    if kind == "scenario":
+        fork, base = artefacts["fork"], artefacts["base"]
+        label = fork.get("name") or fork["fork_id"]
+        badges = [f"scenario: {label}", "hypothetical"]
+        if fork["status"] != "complete":
+            badges.append("partial")
+        result = fork["result"]
+        notes = [
+            f"hypothetical — this panel renders scenario fork "
+            f"{fork['fork_id']} of {fork['base_artefact_id']}. It is "
+            "not a figure of record: it enters no head estimate, no "
+            "watch board, no policy note and no other dashboard.",
+        ]
+        for gap in fork["gaps"]:
+            notes.append(f"named gap on the fork: {gap['needed']}")
+        if fork["kind"] == "demand_estimate":
+            figures = [
+                _fig("Base view — estimated demand",
+                     fork["base_total_tonnes"], "t",
+                     base["estimate_id"], base["as_of"], badges),
+                _fig("Scenario — estimated demand",
+                     fork["fork_total_tonnes"], "t",
+                     fork["fork_id"], fork["as_of"], badges),
+                _fig("Scenario — change vs the base view",
+                     fork["delta_tonnes"], "t",
+                     fork["fork_id"], fork["as_of"], badges),
+            ]
+            rows = [dict(r) for r in fork["reconciliation"]]
+            return figures, rows, notes
+        projected = [m for m in result["months"] if m["projected"]
+                     and m["closing_tonnes"] is not None]
+        figures = [
+            _fig("Base view — projected closing stock",
+                 fork["base_total_tonnes"], "t",
+                 base["projection_id"], base["as_of"], badges),
+            _fig("Scenario — projected closing stock",
+                 fork["fork_total_tonnes"], "t",
+                 fork["fork_id"], fork["as_of"], badges),
+            _fig("Scenario — change vs the base view",
+                 fork["delta_tonnes"], "t",
+                 fork["fork_id"], fork["as_of"], badges),
+        ]
+        if projected:
+            figures.append(_fig(
+                "Scenario — lowest monthly closing",
+                min(m["closing_tonnes"] for m in projected), "t",
+                fork["fork_id"], fork["as_of"], badges))
+        rows = [dict(r) for r in fork["reconciliation"]]
+        return figures, rows, notes
+
     raise ValueError(f"no extractor for panel kind: {kind}")
 
 
@@ -1171,6 +1304,14 @@ def verify_panels(store, panels: list[dict]) -> list[str]:
                 problems.append(
                     f"panel {no}: figure {figure.get('label')!r} has "
                     "no source as-of")
+            if panel["kind"] == "scenario" and not any(
+                    b.startswith("scenario:")
+                    for b in figure.get("badges", [])):
+                problems.append(
+                    f"panel {no}: scenario figure "
+                    f"{figure.get('label')!r} is not badged as a "
+                    "scenario — a hypothetical figure may never "
+                    "render unbadged")
     return problems
 
 

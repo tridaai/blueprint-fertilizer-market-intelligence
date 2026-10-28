@@ -310,6 +310,57 @@ def main(argv=None) -> int:
     p.add_argument("--asked-by", required=True)
     p.add_argument("--as-of", default=None)
 
+    p = sub.add_parser("scenario", help="fork a head estimate/projection with stated levers")
+    p.add_argument("--kind", required=True,
+                   choices=["demand_estimate", "supply_projection"])
+    p.add_argument("--district", default=None)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--lever", action="append", required=True,
+                   help="lever=value, or lever=months@SHIPMENT_ID for "
+                        "an import shift; repeatable")
+    p.add_argument("--by", required=True)
+    p.add_argument("--name", default=None)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("scenario-ask", help="fork from a plain-language scenario request")
+    p.add_argument("--question", required=True)
+    p.add_argument("--asked-by", required=True)
+    p.add_argument("--name", default=None)
+
+    p = sub.add_parser("scenarios", help="list stored scenario forks")
+    p.add_argument("--base", default=None)
+
+    p = sub.add_parser("verify-scenario", help="re-perform a stored scenario fork")
+    p.add_argument("fork_id")
+
+    p = sub.add_parser("planning-options", help="compare a base and its forks side by side")
+    p.add_argument("--base", required=True)
+    p.add_argument("--fork", action="append", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--name", default=None)
+
+    p = sub.add_parser("options", help="read one planning-options artefact")
+    p.add_argument("options_id")
+
+    p = sub.add_parser("verify-options", help="re-perform a stored comparison")
+    p.add_argument("options_id")
+
+    p = sub.add_parser("adopt", help="adopt one compared option by a named planner's act")
+    p.add_argument("--options", required=True)
+    p.add_argument("--fork", default=None,
+                   help="the fork to adopt; omit to adopt the base view")
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", default=None)
+    p.add_argument("--note", default=None)
+
+    p = sub.add_parser("adoption", help="the current adoption for a comparison")
+    p.add_argument("options_id")
+
+    p = sub.add_parser("verify-adoption", help="verify a stored adoption act")
+    p.add_argument("adoption_id")
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -621,6 +672,56 @@ def main(argv=None) -> int:
         elif args.command == "role-dashboard":
             result = service.role_default_dashboard(
                 args.role, args.asked_by, as_of)
+        elif args.command == "scenario":
+            levers = []
+            for raw in args.lever:
+                spec, _, shipment = raw.partition("@")
+                lever, _, value = spec.partition("=")
+                entry = {"lever": lever.strip(),
+                         "value": float(value)}
+                if shipment:
+                    entry["shipment_id"] = shipment.strip()
+                levers.append(entry)
+            scope = {"product": args.product,
+                     "crop_year": args.crop_year, "season": args.season}
+            if args.kind == "demand_estimate":
+                if not args.district:
+                    print("a demand fork names --district",
+                          file=sys.stderr)
+                    return 2
+                scope = {"district_id": args.district, **scope}
+            result = service.create_scenario(
+                args.kind, scope, levers, args.by, name=args.name,
+                as_of=args.as_of)
+        elif args.command == "scenario-ask":
+            result = service.ask_scenario(
+                args.question, args.asked_by, name=args.name)
+        elif args.command == "scenarios":
+            result = service.list_scenarios(args.base)
+        elif args.command == "verify-scenario":
+            result = service.verify_scenario(args.fork_id)
+        elif args.command == "planning-options":
+            result = service.build_planning_options(
+                args.base, args.fork, args.by, name=args.name)
+        elif args.command == "options":
+            result = service.get_planning_options(args.options_id)
+            if result is None:
+                print(f"no such planning options: {args.options_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-options":
+            result = service.verify_planning_options(args.options_id)
+        elif args.command == "adopt":
+            result = service.adopt_option(
+                args.options, args.fork, args.by, as_of, note=args.note)
+        elif args.command == "adoption":
+            result = service.current_adoption(args.options_id)
+            if result is None:
+                print(f"no adoption recorded for {args.options_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-adoption":
+            result = service.verify_adoption(args.adoption_id)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except NarrativeRefused as exc:
