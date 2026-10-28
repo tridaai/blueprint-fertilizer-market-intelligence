@@ -72,6 +72,12 @@ class MarketService:
         artefact = demand_engine.compute_estimate(
             self.store, district_id, product, crop_year, season, as_of
         )
+        if self.store.get_estimate(artefact.estimate_id) is not None:
+            # Already on record (struck earlier, since
+            # superseded as head): compute-or-return means
+            # return it — re-inserting would violate the
+            # insert-only store's uniqueness.
+            return self.get_estimate(artefact.estimate_id)
         rows = self.store.list_estimates(district_id, product, crop_year, season)
         head = demand_engine.head_of(rows, "estimate_id")
         if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
@@ -415,6 +421,14 @@ class MarketService:
         artefact = supply_engine.compute_projection(
             self.store, product, crop_year, season, as_of, chain
         )
+        existing = self.store.get_projection(artefact.projection_id)
+        if existing is not None:
+            # Already on record (struck earlier at this
+            # basis, since superseded as head by a later
+            # basis): compute-or-return means return it —
+            # re-inserting would violate the insert-only
+            # store's uniqueness.
+            return existing
         head = supply_engine.head_of(
             self.store.list_projections(product, crop_year, season), "projection_id"
         )

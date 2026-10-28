@@ -485,9 +485,12 @@ def main() -> int:
           f"{monsoon_fork['base_artefact_id']}:")
     for row in monsoon_fork["reconciliation"]:
         if row["lever_delta_tonnes"]:
+            via = (f"lever {', '.join(row['attributed_levers'])}"
+                   if row["attributed_levers"]
+                   else "knock-on of the changed running total — "
+                        "attributed to no lever")
             print(f"    {row['driver']}: {row['base_delta_tonnes']:+.3f} "
-                  f"-> {row['fork_delta_tonnes']:+.3f} t "
-                  f"(lever {', '.join(row['attributed_levers'])})")
+                  f"-> {row['fork_delta_tonnes']:+.3f} t ({via})")
     print(f"    demand {monsoon_fork['base_total_tonnes']:.3f} -> "
           f"{monsoon_fork['fork_total_tonnes']:.3f} t "
           f"({monsoon_fork['delta_tonnes']:+.3f}); the driver deltas "
@@ -522,10 +525,10 @@ def main() -> int:
               f"stated criteria:")
         for row in options["rows"]:
             label = "base view" if row["is_base"] else "scenario"
+            shown = {k: v for k, v in row["criteria"].items()
+                     if k != "artefact_id"}
             print(f"    rank {row['rank']}: {label} "
-                  f"{row['artefact_id']} — criteria "
-                  f"{ {k: v for k, v in row['criteria'].items() "
-                  f"if k != 'artefact_id'} }")
+                  f"{row['artefact_id']} — criteria {shown}")
     adoption = service.adopt_option(
         supply_options["options_id"], slip_fork["fork_id"],
         "M. Krishnan (supply planner)", "2026-04-15",
