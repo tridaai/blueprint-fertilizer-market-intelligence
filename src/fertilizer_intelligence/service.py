@@ -479,6 +479,15 @@ class MarketService:
         registration superseding the head by link — the only way
         a hypothetical becomes real, or a scope gets corrected."""
         district_ids = {d["district_id"] for d in self.store.list_districts()}
+        head = policy_engine.head_of(
+            self.store.list_policy_registrations(spec.get("event_id")), "registry_id"
+        )
+        if head is not None and not spec.get("recorded_on"):
+            # The recorded date is a property of the event, not
+            # of this registration act: a re-registration that
+            # does not restate it inherits the head's, so the
+            # same content stated again is the same artefact.
+            spec = {**spec, "recorded_on": head["recorded_on"]}
         artefact = policy_engine.build_registration(spec, district_ids, as_of)
         head = policy_engine.head_of(
             self.store.list_policy_registrations(artefact.event_id), "registry_id"
@@ -510,9 +519,19 @@ class MarketService:
         return out
 
     def policy_event_versions(self, event_id) -> list[dict]:
-        """Every recorded version of one event id, oldest link
-        first — the chain a supersession walked."""
-        return self.store.list_policy_registrations(event_id)
+        """Every recorded version of one event id, in chain
+        order — the first registration first, each successor
+        after the version it supersedes."""
+        rows = self.store.list_policy_registrations(event_id)
+        by_id = {r["registry_id"]: r for r in rows}
+        head = policy_engine.head_of(rows, "registry_id")
+        chain = []
+        current = head
+        while current is not None:
+            chain.append(current)
+            current = by_id.get(current["supersedes"])
+        chain.reverse()
+        return chain
 
     def verify_policy_event(self, registry_id) -> list[str]:
         row = self.store.get_policy_registration(registry_id)
