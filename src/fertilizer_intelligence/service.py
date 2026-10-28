@@ -668,7 +668,9 @@ class MarketService:
         """The stale-exclusion read for one share: exactly
         which observations the headline excluded, and why —
         the named exclusion the share artefact carries, served
-        on its own."""
+        on its own. Compute-or-return first, like the share
+        read itself, so the exclusion read stands on its own."""
+        self.market_share(district_id, product, crop_year, season, as_of)
         share = self.get_share(district_id, product, crop_year, season, as_of)
         if share is None:
             raise ValueError(
