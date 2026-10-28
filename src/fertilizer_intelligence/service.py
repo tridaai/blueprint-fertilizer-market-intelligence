@@ -1105,8 +1105,19 @@ class MarketService:
         question's date; parts that cannot be mapped become
         named gaps on the artefact — never dropped, never
         improvised."""
-        base = self._scenario_base(
-            *scenario_engine.scan_scope(self.store, question)[:2])
+        kind0, scope0, _notes, unknown = scenario_engine.scan_scope(
+            self.store, question)
+        if unknown is not None:
+            # The coverage refusal comes first: a request
+            # about an untracked district is refused for
+            # coverage, not for a missing head artefact.
+            tracked = ", ".join(
+                d["name"] for d in self.store.list_districts())
+            raise ValueError(
+                f"district coverage: {unknown} is not one of the "
+                f"tracked districts ({tracked}) — a scenario "
+                "cannot fork an estimate the system does not hold")
+        base = self._scenario_base(kind0, scope0)
         if self.settings.model_profile == "offline":
             kind, scope, records, gaps, parse = \
                 scenario_engine.parse_scenario_grammar(

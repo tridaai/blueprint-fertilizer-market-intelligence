@@ -450,11 +450,13 @@ def resolve_levers(store, kind: str, scope: dict, base: dict,
                 fact = arrivals[shipment_id]
                 fork_expected = _shift_month(fact["expected_month"], months)
                 fork_arrived = _shift_month(fact["arrived_month"], months)
-                if fork_arrived <= base["basis_month"]:
+                if fork_expected <= base["basis_month"] or \
+                        fork_arrived <= base["basis_month"]:
                     refuse(lever,
                            f"shifting {shipment_id} by {months:+d} months "
-                           f"lands its arrival in {fork_arrived}, at or "
-                           f"before the projection's basis month "
+                           f"lands it in {fork_expected} (arrival "
+                           f"{fork_arrived}), at or before the "
+                           f"projection's basis month "
                            f"{base['basis_month']} — a fork re-times "
                            "future arrivals, it does not rewrite the "
                            "basis stock", subject)

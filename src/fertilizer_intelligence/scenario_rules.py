@@ -119,9 +119,10 @@ LEVER_CATALOGUE = {
             "re-time a shipment scheduled in the base "
             "projection by whole months: the fork's view "
             "expects and lands it in the shifted month. The "
-            "shifted arrival must stay after the projection's "
-            "basis month — a fork re-times future arrivals, "
-            "it does not rewrite the basis stock"),
+            "shifted expectation and arrival must both stay "
+            "after the projection's basis month — a fork "
+            "re-times future arrivals, it does not rewrite "
+            "the basis stock"),
     },
     "production_shortfall_pct": {
         "applies_to": (KIND_PROJECTION,),
