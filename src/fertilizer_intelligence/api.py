@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from .config import Settings
 from .demand import NarrativeRefused
 from .logging_config import configure_logging, new_request_id, request_id_var
+from .movements import AlertStateError
 from .service import MarketService
 
 log = logging.getLogger("fertilizer_intelligence.api")
@@ -37,6 +38,22 @@ class OutlookRequest(BaseModel):
 
 
 class NarrativeRequest(BaseModel):
+    as_of: str | None = None
+
+
+class WatchRunRequest(BaseModel):
+    as_of: str | None = None
+
+
+class AcknowledgeRequest(BaseModel):
+    actor: str
+    note: str
+    as_of: str | None = None
+
+
+class CloseRequest(BaseModel):
+    actor: str
+    closing_reason: str
     as_of: str | None = None
 
 
@@ -184,6 +201,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except NarrativeRefused as exc:
             raise HTTPException(status_code=422, detail={"problems": exc.problems}) from exc
+
+    # -- price watch (R3) --------------------------------------------
+
+    @app.post("/watch/run")
+    def run_watch(body: WatchRunRequest) -> dict:
+        return service.run_price_watch(body.as_of or date.today().isoformat())
+
+    @app.get("/movements")
+    def list_movements(series_kind: str | None = None, item: str | None = None) -> list[dict]:
+        return service.store.list_movements(series_kind, item)
+
+    @app.get("/movements/{movement_id}")
+    def get_movement(movement_id: str) -> dict:
+        movement = service.store.get_movement(movement_id)
+        if movement is None:
+            raise HTTPException(status_code=404, detail=f"no such movement: {movement_id}")
+        return movement
+
+    @app.get("/movements/{movement_id}/verify")
+    def verify_movement(movement_id: str) -> dict:
+        if service.store.get_movement(movement_id) is None:
+            raise HTTPException(status_code=404, detail=f"no such movement: {movement_id}")
+        problems = service.verify_movement(movement_id)
+        return {"movement_id": movement_id, "ok": not problems, "problems": problems}
+
+    @app.get("/alerts")
+    def list_alerts(
+        series_kind: str | None = None, item: str | None = None,
+        rule_id: str | None = None, state: str | None = None,
+    ) -> list[dict]:
+        return service.list_alerts(series_kind, item, rule_id, state)
+
+    @app.get("/alerts/{alert_id}")
+    def get_alert(alert_id: str) -> dict:
+        alert = service.get_alert(alert_id)
+        if alert is None:
+            raise HTTPException(status_code=404, detail=f"no such alert: {alert_id}")
+        return alert
+
+    @app.get("/alerts/{alert_id}/verify")
+    def verify_alert(alert_id: str) -> dict:
+        if service.store.get_alert(alert_id) is None:
+            raise HTTPException(status_code=404, detail=f"no such alert: {alert_id}")
+        problems = service.verify_alert(alert_id)
+        return {"alert_id": alert_id, "ok": not problems, "problems": problems}
+
+    @app.post("/alerts/{alert_id}/acknowledge")
+    def acknowledge_alert(alert_id: str, body: AcknowledgeRequest) -> dict:
+        if service.store.get_alert(alert_id) is None:
+            raise HTTPException(status_code=404, detail=f"no such alert: {alert_id}")
+        try:
+            return service.acknowledge_alert(
+                alert_id, body.actor, body.note, body.as_of or date.today().isoformat()
+            )
+        except AlertStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/alerts/{alert_id}/close")
+    def close_alert(alert_id: str, body: CloseRequest) -> dict:
+        if service.store.get_alert(alert_id) is None:
+            raise HTTPException(status_code=404, detail=f"no such alert: {alert_id}")
+        try:
+            return service.close_alert(
+                alert_id, body.actor, body.closing_reason,
+                body.as_of or date.today().isoformat(),
+            )
+        except AlertStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/watch")
+    def watch_board() -> list[dict]:
+        return service.watch_board()
+
+    @app.get("/watch/{series_kind}/{item}")
+    def series_watch(series_kind: str, item: str) -> dict:
+        known = {(p["series_kind"], p["item"]) for p in service.store.price_points()}
+        if (series_kind, item) not in known:
+            raise HTTPException(
+                status_code=404, detail=f"no such price series: {series_kind}/{item}"
+            )
+        return service.series_watch(series_kind, item)
 
     return app
 
