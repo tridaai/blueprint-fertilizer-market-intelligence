@@ -13,6 +13,7 @@ import logging
 from . import alert_rules as alert_pack
 from . import demand as demand_engine
 from . import movements as movement_engine
+from . import supply as supply_engine
 from .config import Settings, load_settings
 from .generator import PRODUCTS, load_dataset
 from .modelport import get_model_port
@@ -288,6 +289,133 @@ class MarketService:
             })
         board.sort(key=lambda r: (-alert_pack.BAND_RANK[r["band"]], r["series_kind"], r["item"]))
         return board
+
+    # -- supply tracker (R4) ---------------------------------------
+
+    def _position_chain(self, product, as_of) -> dict:
+        """Compute-or-return the stored position chain for one
+        product, keyed by month. A month whose computed artefact
+        is new is stored superseding that month's head by link —
+        and, through the chain's opening link, every month after
+        it follows."""
+        by_month = {}
+        for position in supply_engine.compute_position_chain(self.store, product, as_of):
+            head = supply_engine.head_of(
+                self.store.list_positions(product, position.month), "position_id"
+            )
+            if head is not None and head["fact_fingerprint"] == position.fact_fingerprint:
+                by_month[position.month] = head
+                continue
+            position = position.model_copy(
+                update={"supersedes": head["position_id"] if head else None}
+            )
+            dumped = position.model_dump()
+            self.store.insert_supply_position(dumped, dumped["lines"])
+            log.info("supply position stored: %s", position.position_id)
+            by_month[position.month] = self.store.get_position(position.position_id)
+        return by_month
+
+    def supply_position(self, product, month, as_of) -> dict:
+        by_month = self._position_chain(product, as_of)
+        if month not in by_month:
+            raise ValueError(
+                f"{month} is outside the tracked period for {product}"
+            )
+        return by_month[month]
+
+    def supply_positions(self, product, as_of) -> list[dict]:
+        by_month = self._position_chain(product, as_of)
+        return [by_month[month] for month in sorted(by_month)]
+
+    def get_position(self, product, month) -> dict | None:
+        return supply_engine.head_of(
+            self.store.list_positions(product, month), "position_id"
+        )
+
+    def verify_position(self, product, month) -> list[str]:
+        head = self.get_position(product, month)
+        if head is None:
+            return [f"no supply position stored for {product} {month}"]
+        return supply_engine.verify_position(
+            self.store, head, self.store.position_lines(head["position_id"])
+        )
+
+    def supply_gap(self, product, crop_year, season, as_of) -> dict:
+        """Compute-or-return the season gap: the R2 outlook's
+        demand rollup against the position chain and the import
+        programme at this as-of. A new as-of (or changed facts)
+        stores a new gap superseding the head by link."""
+        outlook = self.demand_outlook(crop_year, season, as_of)
+        demand_tonnes = outlook["product_rollups"].get(product)
+        if demand_tonnes is None:
+            raise ValueError(f"the outlook carries no rollup for {product}")
+        self._position_chain(product, as_of)
+        chain = supply_engine.compute_position_chain(self.store, product, as_of)
+        artefact = supply_engine.compute_gap(
+            self.store, product, crop_year, season, as_of,
+            demand_tonnes, outlook["outlook_id"], chain,
+        )
+        head = supply_engine.head_of(
+            self.store.list_gaps(product, crop_year, season), "gap_id"
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["gap_id"] if head else None}
+        )
+        self.store.insert_supply_gap(artefact.model_dump())
+        log.info("supply gap stored: %s", artefact.gap_id)
+        return self.store.get_gap(artefact.gap_id)
+
+    def get_gap(self, product, crop_year, season) -> dict | None:
+        return supply_engine.head_of(
+            self.store.list_gaps(product, crop_year, season), "gap_id"
+        )
+
+    def verify_gap(self, product, crop_year, season) -> list[str]:
+        head = self.get_gap(product, crop_year, season)
+        if head is None:
+            return [f"no supply gap stored for {product} {crop_year} {season}"]
+        return supply_engine.verify_gap(self.store, head)
+
+    def supply_projection(self, product, crop_year, season, as_of) -> dict:
+        """Compute-or-return the projected position for a season,
+        struck at the end of the as-of month. Recomputing over a
+        moved assumption set (a slip, a landing, a later basis)
+        stores a new projection whose assumption changes are
+        named against the version it supersedes."""
+        self._position_chain(product, as_of)
+        chain = supply_engine.compute_position_chain(self.store, product, as_of)
+        artefact = supply_engine.compute_projection(
+            self.store, product, crop_year, season, as_of, chain
+        )
+        head = supply_engine.head_of(
+            self.store.list_projections(product, crop_year, season), "projection_id"
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        changes = (
+            supply_engine.diff_assumptions(head["assumption_set"], artefact.assumption_set)
+            if head is not None else []
+        )
+        artefact = artefact.model_copy(update={
+            "supersedes": head["projection_id"] if head else None,
+            "assumption_changes": changes,
+        })
+        self.store.insert_supply_projection(artefact.model_dump())
+        log.info("supply projection stored: %s", artefact.projection_id)
+        return self.store.get_projection(artefact.projection_id)
+
+    def get_projection(self, product, crop_year, season) -> dict | None:
+        return supply_engine.head_of(
+            self.store.list_projections(product, crop_year, season), "projection_id"
+        )
+
+    def verify_projection(self, product, crop_year, season) -> list[str]:
+        head = self.get_projection(product, crop_year, season)
+        if head is None:
+            return [f"no supply projection stored for {product} {crop_year} {season}"]
+        return supply_engine.verify_projection(self.store, head)
 
     def ready(self) -> bool:
         return self.store.get_manifest() is not None and all(

@@ -126,6 +126,59 @@ def main() -> int:
     print(f"Then closed with reason '{closed['acts'][-1]['closing_reason']}' "
           f"-> state {closed['state']} (state is derived from the acts; "
           "the alert artefact itself was never edited)")
+
+    print("\n--- Round 4: the import & supply-gap tracker ---")
+    chain = service.supply_positions("DAP", "2026-04-15")
+    print(f"\nDAP supply position chain: {len(chain)} months computed "
+          f"({chain[0]['month']} .. {chain[-1]['month']}); every month's "
+          "opening is the prior month's closing, and every figure is a "
+          "recorded line over named facts.")
+    print("\nThe planted delay, as the position chain saw it "
+          "(shipment IMP-DAP-2510, expected 2025-10):")
+    for position in chain:
+        if position["month"] in ("2025-09", "2025-10", "2025-11", "2025-12"):
+            print(f"  {position['month']}: opening {position['opening_tonnes']:>13,.3f} t"
+                  f"  production {position['production_actual_tonnes']:>10,.1f} t"
+                  f"  imports {position['imports_tonnes']:>8,.0f} t"
+                  f"  consumption {position['consumption_tonnes']:>10,.3f} t"
+                  f"  closing {position['closing_tonnes']:>13,.3f} t")
+    problems = service.verify_position("DAP", "2025-10")
+    print(f"  October position verification problems: {problems} "
+          "— the dip is real: no vessel landed, and the identity still holds.")
+
+    gap_oct = service.supply_gap("DAP", "2025-26", "kharif", "2025-11-30")
+    print(f"\nSupply gap, DAP kharif 2025-26 at 2025-11-30: band "
+          f"{gap_oct['band']} ({gap_oct['band_basis']}) — the season's import "
+          f"programme is {gap_oct['due_imports_tonnes']:,.0f} t due, "
+          f"{gap_oct['credited_imports_tonnes']:,.0f} t credited, "
+          f"{gap_oct['slipped_tonnes']:,.0f} t slipped; cover "
+          f"{gap_oct['programme_cover_pct']:.2f}%.")
+    gap_dec = service.supply_gap("DAP", "2025-26", "kharif", "2025-12-31")
+    print(f"The same gap at 2025-12-31, after the vessel landed: band "
+          f"{gap_dec['band']}, cover {gap_dec['programme_cover_pct']:.2f}%, "
+          f"slipped {gap_dec['slipped_tonnes']:,.0f} t "
+          f"(the new gap supersedes the old by link: {gap_dec['supersedes'] == gap_oct['gap_id']}).")
+    gap_mop = service.supply_gap("MOP", "2025-26", "kharif", "2025-11-30")
+    print(f"MOP kharif 2025-26 at 2025-11-30: band {gap_mop['band']} "
+          f"({gap_mop['band_basis']}) — import-only, so the level reading "
+          f"binds: available {gap_mop['available_tonnes']:,.3f} t against "
+          f"demand {gap_mop['demand_tonnes']:,.3f} t "
+          f"({gap_mop['gap_pct_of_demand']:.2f}%).")
+
+    proj_first = service.supply_projection("DAP", "2025-26", "rabi", "2025-09-30")
+    print(f"\nProjected DAP position for rabi 2025-26, struck at the end of "
+          f"{proj_first['basis_month']}: status {proj_first['status']}, "
+          f"projected closing {proj_first['closing_tonnes']:,.3f} t — the "
+          "delayed vessel is a scheduled assumption at its expected month.")
+    proj_slip = service.supply_projection("DAP", "2025-26", "rabi", "2025-11-30")
+    print(f"Re-struck at the end of {proj_slip['basis_month']}, the "
+          "projection supersedes by link and names its changes:")
+    for change in proj_slip["assumption_changes"]:
+        print(f"  - {change['kind']}: {change['detail']}")
+    print(f"  projected closing now {proj_slip['closing_tonnes']:,.3f} t; "
+          f"verification problems: "
+          f"{service.verify_projection('DAP', '2025-26', 'rabi')}")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 

@@ -57,6 +57,25 @@ class CloseRequest(BaseModel):
     as_of: str | None = None
 
 
+class PositionRequest(BaseModel):
+    product: str
+    as_of: str | None = None
+
+
+class GapRequest(BaseModel):
+    product: str
+    crop_year: str
+    season: str
+    as_of: str | None = None
+
+
+class ProjectionRequest(BaseModel):
+    product: str
+    crop_year: str
+    season: str
+    as_of: str | None = None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     service = MarketService(settings)
     configure_logging(service.settings.log_level)
@@ -286,6 +305,110 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=404, detail=f"no such price series: {series_kind}/{item}"
             )
         return service.series_watch(series_kind, item)
+
+    # -- supply tracker (R4) -----------------------------------------
+
+    @app.post("/positions")
+    def compute_positions(body: PositionRequest) -> list[dict]:
+        try:
+            return service.supply_positions(
+                body.product, body.as_of or date.today().isoformat()
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/positions")
+    def list_positions(
+        product: str | None = None, month: str | None = None
+    ) -> list[dict]:
+        return service.store.list_positions(product, month)
+
+    @app.get("/positions/{product}/{month}")
+    def get_position(product: str, month: str) -> dict:
+        position = service.get_position(product, month)
+        if position is None:
+            raise HTTPException(
+                status_code=404, detail=f"no supply position for {product} {month}"
+            )
+        return position
+
+    @app.get("/positions/{product}/{month}/verify")
+    def verify_position(product: str, month: str) -> dict:
+        position = service.get_position(product, month)
+        if position is None:
+            raise HTTPException(
+                status_code=404, detail=f"no supply position for {product} {month}"
+            )
+        problems = service.verify_position(product, month)
+        return {
+            "position_id": position["position_id"],
+            "ok": not problems, "problems": problems,
+        }
+
+    @app.post("/gaps")
+    def compute_gap(body: GapRequest) -> dict:
+        try:
+            return service.supply_gap(
+                body.product, body.crop_year, body.season,
+                body.as_of or date.today().isoformat(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/gaps/{product}/{crop_year}/{season}")
+    def get_gap(product: str, crop_year: str, season: str) -> dict:
+        gap = service.get_gap(product, crop_year, season)
+        if gap is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no supply gap computed for {product} {crop_year} {season}",
+            )
+        return gap
+
+    @app.get("/gaps/{product}/{crop_year}/{season}/verify")
+    def verify_gap(product: str, crop_year: str, season: str) -> dict:
+        gap = service.get_gap(product, crop_year, season)
+        if gap is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no supply gap computed for {product} {crop_year} {season}",
+            )
+        problems = service.verify_gap(product, crop_year, season)
+        return {"gap_id": gap["gap_id"], "ok": not problems, "problems": problems}
+
+    @app.post("/projections")
+    def compute_projection(body: ProjectionRequest) -> dict:
+        try:
+            return service.supply_projection(
+                body.product, body.crop_year, body.season,
+                body.as_of or date.today().isoformat(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/projections/{product}/{crop_year}/{season}")
+    def get_projection(product: str, crop_year: str, season: str) -> dict:
+        projection = service.get_projection(product, crop_year, season)
+        if projection is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no supply projection computed for {product} {crop_year} {season}",
+            )
+        return projection
+
+    @app.get("/projections/{product}/{crop_year}/{season}/verify")
+    def verify_projection(product: str, crop_year: str, season: str) -> dict:
+        projection = service.get_projection(product, crop_year, season)
+        if projection is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no supply projection computed for {product} {crop_year} {season}",
+            )
+        problems = service.verify_projection(product, crop_year, season)
+        return {
+            "projection_id": projection["projection_id"],
+            "ok": not problems, "problems": problems,
+        }
 
     return app
 

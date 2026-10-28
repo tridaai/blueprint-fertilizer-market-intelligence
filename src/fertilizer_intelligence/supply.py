@@ -171,7 +171,7 @@ def _shift_month(month: str, delta: int) -> str:
     return f"{index // 12:04d}-{index % 12 + 1:02d}"
 
 
-def _head_of(rows: list[dict], id_key: str) -> dict | None:
+def head_of(rows: list[dict], id_key: str) -> dict | None:
     superseded = {r["supersedes"] for r in rows if r.get("supersedes")}
     heads = [r for r in rows if r[id_key] not in superseded]
     return heads[0] if heads else None
@@ -584,7 +584,7 @@ def verify_position(store, position: dict, lines: list[dict]) -> list[str]:
         problems.append("closing line does not equal the position's closing")
 
     heads = store.list_positions(position["product"], position["month"])
-    head = _head_of(heads, "position_id")
+    head = head_of(heads, "position_id")
     if head is not None and head["position_id"] == position["position_id"]:
         fresh = next(
             (p for p in compute_position_chain(store, position["product"], position["as_of"])

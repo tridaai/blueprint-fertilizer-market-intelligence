@@ -9,6 +9,9 @@ for an operator at a terminal.
     python -m fertilizer_intelligence.cli watch-run
     python -m fertilizer_intelligence.cli alerts --item DAP
     python -m fertilizer_intelligence.cli watch
+    python -m fertilizer_intelligence.cli positions --product DAP
+    python -m fertilizer_intelligence.cli gap --product DAP --crop-year 2025-26 --season kharif
+    python -m fertilizer_intelligence.cli projection --product DAP --crop-year 2025-26 --season rabi
 
 Everything prints as JSON. The CLI talks to the service layer
 directly, so what it shows is exactly what the API serves.
@@ -104,6 +107,40 @@ def main(argv=None) -> int:
     p.add_argument("--series-kind", required=True)
     p.add_argument("--item", required=True)
 
+    p = sub.add_parser("positions", help="compute-or-return a product's position chain")
+    p.add_argument("--product", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("position", help="one product-month supply position (head)")
+    p.add_argument("--product", required=True)
+    p.add_argument("--month", required=True)
+
+    p = sub.add_parser("verify-position", help="verify a stored position against its facts")
+    p.add_argument("--product", required=True)
+    p.add_argument("--month", required=True)
+
+    p = sub.add_parser("gap", help="compute-or-return the season supply gap")
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-gap", help="verify the stored supply gap")
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+
+    p = sub.add_parser("projection", help="compute-or-return the projected season position")
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-projection", help="verify the stored projection")
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -144,6 +181,62 @@ def main(argv=None) -> int:
                 print(f"no such price series: {args.series_kind}/{args.item}", file=sys.stderr)
                 return 2
             result = service.series_watch(args.series_kind, args.item)
+        elif args.command == "positions":
+            result = service.supply_positions(args.product, as_of)
+        elif args.command == "position":
+            result = service.get_position(args.product, args.month)
+            if result is None:
+                print(
+                    f"no supply position for {args.product} {args.month}",
+                    file=sys.stderr,
+                )
+                return 2
+        elif args.command == "verify-position":
+            position = service.get_position(args.product, args.month)
+            if position is None:
+                print(
+                    f"no supply position for {args.product} {args.month}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_position(args.product, args.month)
+            result = {
+                "position_id": position["position_id"],
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "gap":
+            result = service.supply_gap(args.product, args.crop_year, args.season, as_of)
+        elif args.command == "verify-gap":
+            gap = service.get_gap(args.product, args.crop_year, args.season)
+            if gap is None:
+                print(
+                    f"no supply gap computed for {args.product} "
+                    f"{args.crop_year} {args.season}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_gap(args.product, args.crop_year, args.season)
+            result = {"gap_id": gap["gap_id"], "ok": not problems, "problems": problems}
+        elif args.command == "projection":
+            result = service.supply_projection(
+                args.product, args.crop_year, args.season, as_of
+            )
+        elif args.command == "verify-projection":
+            projection = service.get_projection(args.product, args.crop_year, args.season)
+            if projection is None:
+                print(
+                    f"no supply projection computed for {args.product} "
+                    f"{args.crop_year} {args.season}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_projection(
+                args.product, args.crop_year, args.season
+            )
+            result = {
+                "projection_id": projection["projection_id"],
+                "ok": not problems, "problems": problems,
+            }
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except NarrativeRefused as exc:
