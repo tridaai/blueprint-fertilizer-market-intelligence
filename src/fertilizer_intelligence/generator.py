@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from . import models
+from .demand_rules import PRODUCT_NUTRIENT, SOIL_FACTOR, monsoon_factor
 
 GENERATOR_VERSION = "1.0.0"
 SEED = 20261027
@@ -89,33 +90,12 @@ RATES = {
     "vegetables":(150,   60,   60,    40,   0,     1.0),
 }
 
-# Which soil nutrient primarily drives each fertilizer's adjustment.
-PRODUCT_NUTRIENT = {
-    "UREA": "nitrogen",
-    "DAP": "phosphorus",
-    "NPK_10_26_26": "potassium",
-    "MOP": "potassium",
-    "GLYPHOSATE": None,
-    "CHLORPYRIFOS": None,
-}
-
-SOIL_FACTOR = {"low": 1.10, "medium": 1.00, "high": 0.92}
-
-
-def monsoon_factor(season: str, deviation_pct: float) -> float:
-    """Stated rule: kharif application responds to the monsoon; rabi
-    runs on residual moisture/irrigation and is held at 1.0."""
-    if season != "kharif":
-        return 1.0
-    if deviation_pct <= -15:
-        return 0.92
-    if deviation_pct <= -5:
-        return 0.96
-    if deviation_pct < 5:
-        return 1.00
-    if deviation_pct < 15:
-        return 1.03
-    return 1.05
+# The soil factors, the product->nutrient map and the monsoon
+# response rule live in demand_rules.py — the versioned rule pack
+# the R2 demand engine also computes from, so the generator and
+# the engine can never drift onto two statements of the same rule.
+# They are imported at the top of this module and re-exported here
+# for the derivation below.
 
 
 def derive_consumption(area_facts, rates, soil_facts, monsoon_facts) -> dict:
