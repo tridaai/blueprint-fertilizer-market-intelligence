@@ -14,9 +14,10 @@ from . import alert_rules as alert_pack
 from . import demand as demand_engine
 from . import movements as movement_engine
 from . import policy as policy_engine
+from . import share as share_engine
 from . import supply as supply_engine
 from .config import Settings, load_settings
-from .generator import PRODUCTS, load_dataset
+from .generator import CROP_YEARS, PRODUCTS, load_dataset
 from .modelport import get_model_port
 from .movements import AlertStateError
 from .store import MarketStore
@@ -583,6 +584,152 @@ class MarketService:
         if head is None:
             return [f"no impact note stored for registration {registry_id}"]
         return policy_engine.verify_impact_note(self.store, head)
+
+    # -- competitor & share intelligence (R6) ------------------
+
+    def build_competitor_observations(self) -> dict:
+        """The observation pass over the tracked competitor
+        points: each point becomes a CompetitorObservation
+        artefact with its provenance on its face. Idempotent —
+        a point whose observation is already stored is left
+        exactly as it is."""
+        districts = self.store.list_districts()
+        stored = already = 0
+        for point in self.store.competitor_points():
+            artefact = share_engine.observation_from_point(point, districts)
+            if self.store.get_competitor_observation(artefact.observation_id) is not None:
+                already += 1
+                continue
+            self.store.insert_competitor_observation(artefact.model_dump())
+            stored += 1
+        return {
+            "observations_stored": stored,
+            "already_present": already,
+            "observations_total": len(self.store.list_competitor_observations()),
+        }
+
+    def get_competitor_observation(self, observation_id) -> dict | None:
+        return self.store.get_competitor_observation(observation_id)
+
+    def list_competitor_observations(
+        self, competitor=None, region=None, product=None, season=None
+    ) -> list[dict]:
+        return self.store.list_competitor_observations(
+            competitor, region, product, season
+        )
+
+    def verify_competitor_observation(self, observation_id) -> list[str]:
+        row = self.store.get_competitor_observation(observation_id)
+        if row is None:
+            return [f"no such competitor observation: {observation_id}"]
+        return share_engine.verify_observation(self.store, row)
+
+    def market_share(self, district_id, product, crop_year, season, as_of=None) -> dict:
+        """Compute-or-return the head share for one
+        district x product x season at a read date (default:
+        the season's close). The season outlook is ensured
+        first — the region structure anchor and the demand
+        denominator read the head R2 estimates. A recomputation over
+        changed inputs stores a new share superseding the head
+        for the same read date by link."""
+        self.build_competitor_observations()
+        self.demand_outlook(crop_year, season, as_of or share_engine.season_close(crop_year, season))
+        read_date = as_of or share_engine.season_close(crop_year, season)
+        artefact = share_engine.compute_share(
+            self.store, district_id, product, crop_year, season, read_date
+        )
+        head = share_engine.head_of(
+            self.store.list_shares(district_id, product, crop_year, season, read_date),
+            "share_id",
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["share_id"] if head else None}
+        )
+        self.store.insert_share(artefact.model_dump())
+        log.info("market share stored: %s", artefact.share_id)
+        return self.store.get_share(artefact.share_id)
+
+    def get_share(self, district_id, product, crop_year, season, as_of=None) -> dict | None:
+        read_date = as_of or share_engine.season_close(crop_year, season)
+        return share_engine.head_of(
+            self.store.list_shares(district_id, product, crop_year, season, read_date),
+            "share_id",
+        )
+
+    def verify_share(self, share_id) -> list[str]:
+        row = self.store.get_share(share_id)
+        if row is None:
+            return [f"no such market share: {share_id}"]
+        return share_engine.verify_share(self.store, row)
+
+    def share_stale_exclusions(self, district_id, product, crop_year, season, as_of=None) -> dict:
+        """The stale-exclusion read for one share: exactly
+        which observations the headline excluded, and why —
+        the named exclusion the share artefact carries, served
+        on its own."""
+        share = self.get_share(district_id, product, crop_year, season, as_of)
+        if share is None:
+            raise ValueError(
+                f"no market share computed for {district_id} {product} "
+                f"{crop_year} {season}"
+            )
+        headline = share["headline"]
+        return {
+            "share_id": share["share_id"],
+            "district_id": district_id,
+            "product": product,
+            "crop_year": crop_year,
+            "season": season,
+            "as_of": share["as_of"],
+            "status": share["status"],
+            "headline_note": share["headline_note"],
+            "excluded_observations": (
+                headline["excluded_observations"] if headline else []
+            ),
+            "stale_count": (
+                len([e for e in headline["excluded_observations"]
+                      if e["reason"] == "stale"]) if headline else 0
+            ),
+        }
+
+    def share_movement(self, district_id, product, season, as_of) -> dict:
+        """Compute-or-return the share movement between the two
+        tracked crop years for one district x product x season:
+        each year's share is struck at its own season close
+        (the like-for-like read), and the movement compares
+        their full-season readings."""
+        from_year, to_year = CROP_YEARS[0], CROP_YEARS[-1]
+        from_share = self.market_share(district_id, product, from_year, season)
+        to_share = self.market_share(district_id, product, to_year, season)
+        artefact = share_engine.compute_movement(
+            self.store, from_share, to_share, as_of
+        )
+        head = share_engine.head_of(
+            self.store.list_share_movements(district_id, product, season),
+            "movement_id",
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["movement_id"] if head else None}
+        )
+        self.store.insert_share_movement(artefact.model_dump())
+        log.info("share movement stored: %s", artefact.movement_id)
+        return self.store.get_share_movement(artefact.movement_id)
+
+    def get_share_movement(self, district_id, product, season) -> dict | None:
+        return share_engine.head_of(
+            self.store.list_share_movements(district_id, product, season),
+            "movement_id",
+        )
+
+    def verify_share_movement(self, movement_id) -> list[str]:
+        row = self.store.get_share_movement(movement_id)
+        if row is None:
+            return [f"no such share movement: {movement_id}"]
+        return share_engine.verify_movement(self.store, row)
 
     def ready(self) -> bool:
         return self.store.get_manifest() is not None and all(
