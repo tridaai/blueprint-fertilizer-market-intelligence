@@ -363,6 +363,64 @@ and never presents a stale figure as current.
   mismatches, not-current mismatches, movement
   re-performance failures, share tamper undetected.
 
+## What Round 7 adds
+
+- **Field reports become artefacts with a lifecycle** — the
+  twelve planted field reports and every report from the
+  mobile intake land as `FieldSignalReport` artefacts
+  through one landing machinery. The intake is a structured,
+  low-bandwidth form (reporter, district, product, signal
+  type, quantity/price observed, photo reference as a
+  string) validated at the port: a submission missing its
+  reporter, district or observation date is refused with
+  the missing fields named — attribution is never defaulted
+  (Law 5).
+- **Offline outbox, exactly-once sync** — a submission
+  carries a client-generated id from the device's outbox.
+  The same id with the same payload lands exactly once,
+  however often a dropped connection re-sends it (a partial
+  sync followed by a full re-send is the graded walk). The
+  same id with a *different* payload is a conflict: both
+  artefacts are kept, linked, and read as conflicted —
+  never a silent overwrite.
+- **The verification queue** — every report lands
+  `unreviewed`. Named reviewers record insert-only acts
+  (confirm / query / reject, each with a reason from the
+  act's stated vocabulary in the versioned field pack);
+  the review state is the fold of the acts and is stored
+  nowhere. Rejection is terminal — a corrected observation
+  arrives as a new report, not a revived one.
+- **Weighting with the Law 5 cap, graded to the digit** —
+  the field-signal assessment is the first consumer a field
+  signal can move: per district × product × season it folds
+  the cell's reports into an adjustment against the head R2
+  demand estimate (which is read, never mutated). Each
+  report contributes its kind's stated effect from the pack
+  (demand surge +6.0, stock-out +5.0, …), decayed by a
+  stated 30-day half-life and weighted by review state:
+  confirmed at full decayed weight, **an unreviewed report
+  clamped to the pack's unverified cap of 1.5 percentage
+  points**, queried and rejected at zero, expired (past
+  180 days) named at zero. The graded case: a fresh
+  unreviewed surge whose uncapped weight is 5.345394%
+  applies as exactly 1.5% against Ludhiana's DAP estimate —
+  and as its full 5.345394% once a named reviewer confirms
+  it. Every contribution is a line naming its reporter and
+  review state; reports not yet observable at the read date
+  are named in an excluded list, never silently dropped.
+- **Surfaces** — migration 0007 (field signal reports,
+  review acts, assessments), `POST /field-signals/sync`,
+  planted promotion, report list/read/verify, the review
+  queue, the review act endpoint, and assessment
+  compute/read/verify on the API, with `field-sync` /
+  `field-promote` / `field-reports` / `field-report` /
+  `field-review` / `field-queue` / `field-assessment` /
+  verify commands on the CLI, and the airplane-mode walk in
+  the demo. The eval gate grows the round-7 counters:
+  duplicate syncs landed, uncapped unverified influence,
+  unattributed artefacts, silent overwrites, zero-influence
+  violations, influence re-performance failures.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -461,14 +519,27 @@ SeaweedFS S3 gateway together.
   and share movements between the crop years with the
   biggest mover's provenance carried — migration 0006,
   API + CLI surfaces, demo walk, tests and eval counters.
+- **Built and gated in R7:** field signals & mobile intake —
+  structured intake validated at the port (missing
+  attribution fields named, never defaulted), exactly-once
+  outbox sync with conflicts kept both and linked, the
+  planted reports promoted through the same landing
+  machinery, the verification queue (insert-only reviewer
+  acts, state derived, rejection terminal), and the
+  weighting assessment: kind effect × freshness decay ×
+  review state against the head R2 estimate, an unreviewed
+  report clamped to the pack's 1.5-point unverified cap
+  (graded exact: 5.345394% uncapped applies as 1.5%),
+  queried/rejected/expired at zero and named — migration
+  0007, API + CLI surfaces, demo walk, tests and eval
+  counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** field-signal
-  weighting (R7), the plain-language
+- **Not built yet (on the round map):** the plain-language
   dashboard assembler (R8), scenario forks (R9), the weekly
   brief (R10), the Postgres production smoke (R11) and the
   console (R13).
@@ -497,14 +568,16 @@ src/fertilizer_intelligence/
   policy.py          registry events, impact notes and their verifiers
   share_rules.py     the versioned share pack (freshness, structure, bases)
   share.py           observations, market shares, movements, verifiers
+  field_rules.py     the versioned field pack (intake, kinds, decay, cap, acts)
+  field.py           signal landing, review fold, weighting assessments
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0006 in sqlite + postgres dialects
+migrations/          0001-0007 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md

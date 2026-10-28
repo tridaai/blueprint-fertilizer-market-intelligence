@@ -70,6 +70,22 @@ verifier. The service ensures the observation pass and the
 season outlook before a share is computed, and the stale
 read is compute-or-return like the share read itself.
 
+Round 7 adds field signals & mobile intake behind the same
+ports: `field_rules.py` states the pack once (the intake
+contract, the kind normalization and effects, the freshness
+decay and expiry, the unverified cap, the review acts and
+their reason vocabularies), and `field.py` lands structured
+submissions exactly once per (submission id, payload) —
+conflicts kept both, linked — folds reviewer acts into a
+derived review state, and computes the weighting assessment
+against the head R2 estimate (migration 0007), each artefact
+with its own re-performance verifier. The planted R1 field
+reports enter through the same landing machinery by
+promotion, so one lifecycle covers every field signal; the
+service ensures the cell's estimate before an assessment is
+computed, and the assessment read is compute-or-return like
+the other engines' reads.
+
 Later rounds add, behind the same ports: the alert recorder, the
 dashboard assembler (AgentSQL-shaped: natural language → governed
 artefact selection → static page), scenario forks, and the
@@ -185,6 +201,30 @@ artefact.
   `not_current` and carries no headline — the full-season
   figures remain inspectable under their own basis label,
   but nothing presents a stale number as the current share.
+- **Field signals are attributed, exactly-once, and never
+  overwritten.** A field report exists only as an artefact
+  landed from a submission that named its reporter,
+  district, product and observation date — the port refuses
+  anything less, naming the missing fields. Landing is
+  keyed by (submission id, payload hash): re-sends are
+  duplicates, and a changed payload under a known id lands
+  alongside the original, linked — the store has no path by
+  which one report replaces another. Review state is the
+  fold of insert-only reviewer acts (the reports table has
+  no state column), and rejection is terminal in the fold.
+- **Field weight is review state times freshness, capped
+  while unverified.** The assessment is the field signals'
+  only path into a number: each report contributes its
+  kind's stated effect, decayed by the pack's half-life,
+  confirmed reports at full decayed weight, unreviewed
+  reports clamped per-report to the pack's unverified cap,
+  queried and rejected reports at zero, expired reports
+  named at zero. The estimate an assessment adjusts is read
+  and referenced, never mutated — the base and adjusted
+  totals ride side by side on the assessment, and every
+  contribution line names its reporter and review state, so
+  the adjustment re-performs from the stored reports, acts
+  and pack alone.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -193,7 +233,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0006)
+## Data model (migrations 0001–0007)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -261,6 +301,24 @@ district × product × season: the two crop years and the
 read date as columns; the per-seller rows, the biggest
 mover with its observation provenance, and the two share
 ids in the payload). All three are insert-only.
+
+Field tables (0007): `field_signal_reports` (one row per
+landed submission: the submission id and payload hash, the
+reporter, district, product, signal type and normalized
+kind, the observation date and its attributed season, the
+source label and landing date, and a `conflicts_with` link
+as columns; the submitted form fields and the submission
+exactly as received in the payload — deliberately no review
+state column, state being the fold of the acts),
+`field_review_acts` (one row per act: the report it acts
+on, the act, the named reviewer, the reason from the act's
+vocabulary, an optional note and the act date), and
+`field_signal_assessments` (one row per district × product
+× season × read date: the head estimate it adjusts, the
+base and adjusted totals and the adjustment as columns; the
+per-report contribution lines, the named exclusions and the
+capped list in the payload, with a `supersedes` link). All
+three are insert-only.
 
 ## Deployment
 
