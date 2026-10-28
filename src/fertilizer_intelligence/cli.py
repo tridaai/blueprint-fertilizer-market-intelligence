@@ -12,6 +12,9 @@ for an operator at a terminal.
     python -m fertilizer_intelligence.cli positions --product DAP
     python -m fertilizer_intelligence.cli gap --product DAP --crop-year 2025-26 --season kharif
     python -m fertilizer_intelligence.cli projection --product DAP --crop-year 2025-26 --season rabi
+    python -m fertilizer_intelligence.cli policy-register
+    python -m fertilizer_intelligence.cli policy-events --actual
+    python -m fertilizer_intelligence.cli policy-impact --registry-id POLREG-...
 
 Everything prints as JSON. The CLI talks to the service layer
 directly, so what it shows is exactly what the API serves.
@@ -141,6 +144,50 @@ def main(argv=None) -> int:
     p.add_argument("--crop-year", required=True)
     p.add_argument("--season", required=True)
 
+    p = sub.add_parser("policy-register", help="register the recorded policy facts into the registry")
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("policy-events", help="list current policy registrations (chain heads)")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--hypothetical", action="store_true",
+                       help="only the hypothetical proposals")
+    group.add_argument("--actual", action="store_true",
+                       help="only the real (non-hypothetical) events")
+    p.add_argument("--event-class", default=None)
+
+    p = sub.add_parser("policy-event", help="register one event stated at the desk")
+    p.add_argument("--event-id", required=True)
+    p.add_argument("--event-class", required=True)
+    p.add_argument("--title", required=True)
+    p.add_argument("--detail", required=True)
+    p.add_argument("--from-month", required=True)
+    p.add_argument("--to-month", required=True)
+    p.add_argument("--products", required=True,
+                   help="comma-separated scope items (products or feedstocks)")
+    p.add_argument("--districts", default="",
+                   help="comma-separated district ids (default: market-wide)")
+    p.add_argument("--direction", required=True)
+    p.add_argument("--driver", default=None)
+    p.add_argument("--mechanism", required=True)
+    p.add_argument("--hypothetical", action="store_true")
+    p.add_argument("--source", required=True)
+    p.add_argument("--recorded-on", default=None)
+    p.add_argument("--registered-by", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("policy", help="one policy registration by registry id")
+    p.add_argument("--registry-id", required=True)
+
+    p = sub.add_parser("verify-policy", help="verify a stored policy registration")
+    p.add_argument("--registry-id", required=True)
+
+    p = sub.add_parser("policy-impact", help="compute-or-return a registration's impact note")
+    p.add_argument("--registry-id", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-policy-impact", help="verify a stored impact note")
+    p.add_argument("--registry-id", required=True)
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -235,6 +282,65 @@ def main(argv=None) -> int:
             )
             result = {
                 "projection_id": projection["projection_id"],
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "policy-register":
+            result = service.register_policy_events(as_of)
+        elif args.command == "policy-events":
+            hypothetical = True if args.hypothetical else (
+                False if args.actual else None
+            )
+            result = service.list_policy_events(hypothetical, args.event_class)
+        elif args.command == "policy-event":
+            spec = {
+                "event_id": args.event_id,
+                "event_class": args.event_class,
+                "title": args.title,
+                "detail": args.detail,
+                "effective_from_month": args.from_month,
+                "effective_to_month": args.to_month,
+                "products": [p.strip() for p in args.products.split(",") if p.strip()],
+                "districts": [d.strip() for d in args.districts.split(",") if d.strip()],
+                "direction": args.direction,
+                "driver": args.driver,
+                "mechanism": args.mechanism,
+                "hypothetical": args.hypothetical,
+                "source": args.source,
+                "recorded_on": args.recorded_on,
+                "registered_by": args.registered_by,
+            }
+            result = service.register_policy_event(spec, as_of)
+        elif args.command == "policy":
+            result = service.get_policy_event(args.registry_id)
+            if result is None:
+                print(f"no such policy registration: {args.registry_id}", file=sys.stderr)
+                return 2
+        elif args.command == "verify-policy":
+            event = service.get_policy_event(args.registry_id)
+            if event is None:
+                print(f"no such policy registration: {args.registry_id}", file=sys.stderr)
+                return 2
+            problems = service.verify_policy_event(args.registry_id)
+            result = {
+                "registry_id": args.registry_id,
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "policy-impact":
+            if service.get_policy_event(args.registry_id) is None:
+                print(f"no such policy registration: {args.registry_id}", file=sys.stderr)
+                return 2
+            result = service.policy_impact(args.registry_id, as_of)
+        elif args.command == "verify-policy-impact":
+            note = service.get_policy_impact(args.registry_id)
+            if note is None:
+                print(
+                    f"no impact note computed for registration {args.registry_id}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_policy_impact(args.registry_id)
+            result = {
+                "note_id": note["note_id"],
                 "ok": not problems, "problems": problems,
             }
         else:  # pragma: no cover - argparse enforces the choices

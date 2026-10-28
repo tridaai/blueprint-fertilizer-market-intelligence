@@ -76,6 +76,29 @@ class ProjectionRequest(BaseModel):
     as_of: str | None = None
 
 
+class PolicyRegisterFactsRequest(BaseModel):
+    as_of: str | None = None
+
+
+class PolicyEventRequest(BaseModel):
+    event_id: str
+    event_class: str
+    title: str
+    detail: str
+    effective_from_month: str
+    effective_to_month: str
+    products: list[str]
+    districts: list[str] = []
+    direction: str
+    driver: str | None = None
+    mechanism: str
+    hypothetical: bool = False
+    source: str
+    recorded_on: str | None = None
+    registered_by: str
+    as_of: str | None = None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     service = MarketService(settings)
     configure_logging(service.settings.log_level)
@@ -407,6 +430,105 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         problems = service.verify_projection(product, crop_year, season)
         return {
             "projection_id": projection["projection_id"],
+            "ok": not problems, "problems": problems,
+        }
+
+    # -- policy registry (R5) --------------------------------------
+
+    @app.post("/policy-registry/register-facts")
+    def register_policy_facts(body: PolicyRegisterFactsRequest) -> dict:
+        return service.register_policy_events(
+            body.as_of or date.today().isoformat()
+        )
+
+    @app.post("/policy-registry/events")
+    def register_policy_event(body: PolicyEventRequest) -> dict:
+        spec = body.model_dump(exclude={"as_of"})
+        try:
+            return service.register_policy_event(
+                spec, body.as_of or date.today().isoformat()
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/policy-registry/events")
+    def list_policy_events(
+        hypothetical: bool | None = None, event_class: str | None = None,
+    ) -> list[dict]:
+        return service.list_policy_events(hypothetical, event_class)
+
+    @app.get("/policy-registry/events/{registry_id}")
+    def get_policy_event(registry_id: str) -> dict:
+        event = service.get_policy_event(registry_id)
+        if event is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        return event
+
+    @app.get("/policy-registry/events/{registry_id}/versions")
+    def policy_event_versions(registry_id: str) -> list[dict]:
+        event = service.get_policy_event(registry_id)
+        if event is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        return service.policy_event_versions(event["event_id"])
+
+    @app.get("/policy-registry/events/{registry_id}/verify")
+    def verify_policy_event(registry_id: str) -> dict:
+        if service.get_policy_event(registry_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        problems = service.verify_policy_event(registry_id)
+        return {
+            "registry_id": registry_id,
+            "ok": not problems, "problems": problems,
+        }
+
+    @app.post("/policy-registry/events/{registry_id}/impact")
+    def compute_policy_impact(registry_id: str, body: PolicyRegisterFactsRequest) -> dict:
+        if service.get_policy_event(registry_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        try:
+            return service.policy_impact(
+                registry_id, body.as_of or date.today().isoformat()
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/policy-registry/events/{registry_id}/impact")
+    def get_policy_impact(registry_id: str) -> dict:
+        if service.get_policy_event(registry_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        note = service.get_policy_impact(registry_id)
+        if note is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no impact note computed for registration {registry_id}",
+            )
+        return note
+
+    @app.get("/policy-registry/events/{registry_id}/impact/verify")
+    def verify_policy_impact(registry_id: str) -> dict:
+        if service.get_policy_event(registry_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such policy registration: {registry_id}"
+            )
+        note = service.get_policy_impact(registry_id)
+        if note is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no impact note computed for registration {registry_id}",
+            )
+        problems = service.verify_policy_impact(registry_id)
+        return {
+            "note_id": note["note_id"],
             "ok": not problems, "problems": problems,
         }
 
