@@ -253,6 +253,145 @@ class MarketStore:
                 params.append(value)
         return self._rows(sql + " ORDER BY date, report_id", tuple(params))
 
+    # -- demand artefacts (R2, insert-only) ------------------------------
+    # Estimates, outlooks and narratives are artefacts, not facts:
+    # they are computed from facts and carry the fingerprint of the
+    # fact set they were computed from. They are still insert-only —
+    # a recomputation is a new row linked by supersedes.
+
+    def insert_estimate(self, estimate: dict, contributions: list[dict]) -> None:
+        self._conn.execute(
+            f"INSERT INTO demand_estimates (estimate_id, district_id, product, "
+            f"crop_year, season, status, base_tonnes, total_tonnes, missing_drivers, "
+            f"rules_version, rate_table_version, fact_fingerprint, as_of, supersedes) "
+            f"VALUES ({', '.join([self._ph] * 14)})",
+            (
+                estimate["estimate_id"], estimate["district_id"], estimate["product"],
+                estimate["crop_year"], estimate["season"], estimate["status"],
+                estimate["base_tonnes"], estimate["total_tonnes"],
+                json.dumps(estimate["missing_drivers"]), estimate["rules_version"],
+                estimate["rate_table_version"], estimate["fact_fingerprint"],
+                estimate["as_of"], estimate["supersedes"],
+            ),
+        )
+        self._conn.executemany(
+            f"INSERT INTO demand_contributions (estimate_id, line_no, driver, status, "
+            f"factor, delta_tonnes, value_after_tonnes, inputs) "
+            f"VALUES ({', '.join([self._ph] * 8)})",
+            [
+                (
+                    estimate["estimate_id"], line["line_no"], line["driver"],
+                    line["status"], line["factor"], line["delta_tonnes"],
+                    line["value_after_tonnes"], json.dumps(line["inputs"]),
+                )
+                for line in contributions
+            ],
+        )
+        self._conn.commit()
+
+    def _estimate_row(self, row: dict) -> dict:
+        row["missing_drivers"] = json.loads(row["missing_drivers"])
+        return row
+
+    def get_estimate(self, estimate_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM demand_estimates WHERE estimate_id = {self._ph}",
+            (estimate_id,),
+        )
+        return self._estimate_row(rows[0]) if rows else None
+
+    def list_estimates(self, district_id=None, product=None, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM demand_estimates WHERE 1=1", []
+        for column, value in (
+            ("district_id", district_id), ("product", product),
+            ("crop_year", crop_year), ("season", season),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY district_id, product, crop_year, season, estimate_id", tuple(params))
+        return [self._estimate_row(row) for row in rows]
+
+    def estimate_contributions(self, estimate_id: str) -> list[dict]:
+        rows = self._rows(
+            f"SELECT * FROM demand_contributions WHERE estimate_id = {self._ph} ORDER BY line_no",
+            (estimate_id,),
+        )
+        for row in rows:
+            row["inputs"] = json.loads(row["inputs"])
+        return rows
+
+    def insert_outlook(self, outlook: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO season_outlooks (outlook_id, crop_year, season, status, "
+            f"estimate_count, partial_count, total_tonnes, product_rollups, "
+            f"estimate_ids, rules_version, fact_fingerprint, as_of, supersedes) "
+            f"VALUES ({', '.join([self._ph] * 13)})",
+            (
+                outlook["outlook_id"], outlook["crop_year"], outlook["season"],
+                outlook["status"], outlook["estimate_count"], outlook["partial_count"],
+                outlook["total_tonnes"], json.dumps(outlook["product_rollups"]),
+                json.dumps(outlook["estimate_ids"]), outlook["rules_version"],
+                outlook["fact_fingerprint"], outlook["as_of"], outlook["supersedes"],
+            ),
+        )
+        self._conn.commit()
+
+    def _outlook_row(self, row: dict) -> dict:
+        row["product_rollups"] = json.loads(row["product_rollups"])
+        row["estimate_ids"] = json.loads(row["estimate_ids"])
+        return row
+
+    def get_outlook(self, outlook_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM season_outlooks WHERE outlook_id = {self._ph}",
+            (outlook_id,),
+        )
+        return self._outlook_row(rows[0]) if rows else None
+
+    def list_outlooks(self, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM season_outlooks WHERE 1=1", []
+        for column, value in (("crop_year", crop_year), ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY crop_year, season, outlook_id", tuple(params))
+        return [self._outlook_row(row) for row in rows]
+
+    def insert_narrative(self, narrative: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO outlook_narratives (narrative_id, outlook_id, text, "
+            f"model_profile, model_name, figures, as_of) "
+            f"VALUES ({', '.join([self._ph] * 7)})",
+            (
+                narrative["narrative_id"], narrative["outlook_id"], narrative["text"],
+                narrative["model_profile"], narrative["model_name"],
+                json.dumps(narrative["figures"]), narrative["as_of"],
+            ),
+        )
+        self._conn.commit()
+
+    def get_narrative(self, narrative_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM outlook_narratives WHERE narrative_id = {self._ph}",
+            (narrative_id,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        row["figures"] = json.loads(row["figures"])
+        return row
+
+    def list_narratives(self, outlook_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM outlook_narratives WHERE 1=1", []
+        if outlook_id is not None:
+            sql += f" AND outlook_id = {self._ph}"
+            params.append(outlook_id)
+        rows = self._rows(sql + " ORDER BY narrative_id", tuple(params))
+        for row in rows:
+            row["figures"] = json.loads(row["figures"])
+        return rows
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
