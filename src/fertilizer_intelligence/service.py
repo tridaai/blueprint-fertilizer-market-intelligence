@@ -117,6 +117,8 @@ class MarketService:
             for product in PRODUCTS
         ]
         outlook = demand_engine.build_outlook(estimates, crop_year, season, as_of)
+        if self.store.get_outlook(outlook.outlook_id) is not None:
+            return self.store.get_outlook(outlook.outlook_id)
         rows = self.store.list_outlooks(crop_year, season)
         head = demand_engine.head_of(rows, "outlook_id")
         if head is not None and head["fact_fingerprint"] == outlook.fact_fingerprint:
@@ -332,6 +334,10 @@ class MarketService:
         it follows."""
         by_month = {}
         for position in supply_engine.compute_position_chain(self.store, product, as_of):
+            existing = self.store.get_position(position.position_id)
+            if existing is not None:
+                by_month[position.month] = existing
+                continue
             head = supply_engine.head_of(
                 self.store.list_positions(product, position.month), "position_id"
             )
@@ -387,6 +393,8 @@ class MarketService:
             self.store, product, crop_year, season, as_of,
             demand_tonnes, outlook["outlook_id"], chain,
         )
+        if self.store.get_gap(artefact.gap_id) is not None:
+            return self.store.get_gap(artefact.gap_id)
         head = supply_engine.head_of(
             self.store.list_gaps(product, crop_year, season), "gap_id"
         )
@@ -580,6 +588,8 @@ class MarketService:
             if product in positionable:
                 self._position_chain(product, as_of)
         artefact = policy_engine.compute_impact_note(self.store, event, as_of)
+        if self.store.get_policy_impact_note(artefact.note_id) is not None:
+            return self.store.get_policy_impact_note(artefact.note_id)
         head = policy_engine.head_of(
             self.store.list_policy_impact_notes(registry_id), "note_id"
         )
@@ -656,6 +666,8 @@ class MarketService:
         artefact = share_engine.compute_share(
             self.store, district_id, product, crop_year, season, read_date
         )
+        if self.store.get_share(artefact.share_id) is not None:
+            return self.store.get_share(artefact.share_id)
         head = share_engine.head_of(
             self.store.list_shares(district_id, product, crop_year, season, read_date),
             "share_id",
@@ -726,6 +738,8 @@ class MarketService:
         artefact = share_engine.compute_movement(
             self.store, from_share, to_share, as_of
         )
+        if self.store.get_share_movement(artefact.movement_id) is not None:
+            return self.store.get_share_movement(artefact.movement_id)
         head = share_engine.head_of(
             self.store.list_share_movements(district_id, product, season),
             "movement_id",
@@ -871,6 +885,8 @@ class MarketService:
         artefact = field_engine.compute_assessment(
             self.store, district_id, product, crop_year, season, as_of
         )
+        if self.store.get_field_assessment(artefact.assessment_id) is not None:
+            return self.store.get_field_assessment(artefact.assessment_id)
         head = field_engine.head_of(
             self.store.list_field_assessments(
                 district_id, product, crop_year, season, as_of

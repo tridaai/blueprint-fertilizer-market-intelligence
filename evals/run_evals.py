@@ -1380,7 +1380,7 @@ def main() -> int:
         {"product": "DAP", "crop_year": "2025-26", "season": "rabi"},
         [{"lever": "import_arrival_shift_months", "value": 2,
           "shipment_id": "IMP-DAP-2510"}],
-        "evals", name="October vessel slips")
+        "evals", name="October vessel slips", as_of="2025-09-30")
     fork_elasticity = service.create_scenario(
         "demand_estimate",
         {"district_id": "DST-LUD", "product": "DAP",
@@ -1391,7 +1391,7 @@ def main() -> int:
         "supply_projection",
         {"product": "DAP", "crop_year": "2025-26", "season": "rabi"},
         [{"lever": "production_shortfall_pct", "value": 25}],
-        "evals")
+        "evals", as_of="2025-09-30")
     for fork in (fork_monsoon, fork_slip, fork_elasticity,
                  fork_production):
         if not service.verify_scenario(fork["fork_id"])["verified"]:
