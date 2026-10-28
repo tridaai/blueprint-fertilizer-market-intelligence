@@ -488,6 +488,143 @@ class MarketStore:
             (alert_id,),
         )
 
+    # -- Round 4: supply positions, gaps, projections -----------
+
+    def insert_supply_position(self, position: dict, lines: list[dict]) -> None:
+        self._insert_many(
+            "supply_positions",
+            ["position_id", "product", "month", "opening_tonnes",
+             "production_planned_tonnes", "production_actual_tonnes",
+             "imports_tonnes", "consumption_tonnes", "closing_tonnes",
+             "rules_version", "fact_fingerprint", "as_of", "supersedes",
+             "payload"],
+            [(
+                position["position_id"], position["product"], position["month"],
+                position["opening_tonnes"], position["production_planned_tonnes"],
+                position["production_actual_tonnes"], position["imports_tonnes"],
+                position["consumption_tonnes"], position["closing_tonnes"],
+                position["rules_version"], position["fact_fingerprint"],
+                position["as_of"], position["supersedes"],
+                json.dumps(position),
+            )],
+        )
+        self._insert_many(
+            "supply_position_lines",
+            ["position_id", "line_no", "component", "status", "tonnes",
+             "fact_ids", "inputs"],
+            [(
+                position["position_id"], line["line_no"], line["component"],
+                line["status"], line["tonnes"], json.dumps(line["fact_ids"]),
+                json.dumps(line["inputs"]),
+            ) for line in lines],
+        )
+
+    def _position_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_position(self, position_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM supply_positions WHERE position_id = {self._ph}",
+            (position_id,),
+        )
+        return self._position_row(rows[0]) if rows else None
+
+    def list_positions(self, product=None, month=None) -> list[dict]:
+        sql, params = "SELECT * FROM supply_positions WHERE 1=1", []
+        for column, value in (("product", product), ("month", month)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY product, month, position_id", tuple(params))
+        return [self._position_row(row) for row in rows]
+
+    def position_lines(self, position_id: str) -> list[dict]:
+        rows = self._rows(
+            f"SELECT * FROM supply_position_lines WHERE position_id = {self._ph} "
+            "ORDER BY line_no",
+            (position_id,),
+        )
+        for row in rows:
+            row["fact_ids"] = json.loads(row["fact_ids"])
+            row["inputs"] = json.loads(row["inputs"])
+        return rows
+
+    def insert_supply_gap(self, gap: dict) -> None:
+        self._insert_many(
+            "supply_gaps",
+            ["gap_id", "product", "crop_year", "season", "as_of", "as_of_month",
+             "demand_tonnes", "demand_outlook_id", "available_tonnes",
+             "gap_tonnes", "gap_pct_of_demand", "band", "band_basis",
+             "rules_version", "fact_fingerprint", "supersedes", "payload"],
+            [(
+                gap["gap_id"], gap["product"], gap["crop_year"], gap["season"],
+                gap["as_of"], gap["as_of_month"], gap["demand_tonnes"],
+                gap["demand_outlook_id"], gap["available_tonnes"],
+                gap["gap_tonnes"], gap["gap_pct_of_demand"], gap["band"],
+                gap["band_basis"], gap["rules_version"],
+                gap["fact_fingerprint"], gap["supersedes"], json.dumps(gap),
+            )],
+        )
+
+    def _gap_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_gap(self, gap_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM supply_gaps WHERE gap_id = {self._ph}", (gap_id,)
+        )
+        return self._gap_row(rows[0]) if rows else None
+
+    def list_gaps(self, product=None, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM supply_gaps WHERE 1=1", []
+        for column, value in (("product", product), ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY product, crop_year, season, as_of_month", tuple(params))
+        return [self._gap_row(row) for row in rows]
+
+    def insert_supply_projection(self, projection: dict) -> None:
+        self._insert_many(
+            "supply_projections",
+            ["projection_id", "product", "crop_year", "season", "basis_month",
+             "as_of", "status", "opening_tonnes", "closing_tonnes",
+             "rules_version", "fact_fingerprint", "supersedes", "payload"],
+            [(
+                projection["projection_id"], projection["product"],
+                projection["crop_year"], projection["season"],
+                projection["basis_month"], projection["as_of"],
+                projection["status"], projection["opening_tonnes"],
+                projection["closing_tonnes"], projection["rules_version"],
+                projection["fact_fingerprint"], projection["supersedes"],
+                json.dumps(projection),
+            )],
+        )
+
+    def _projection_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_projection(self, projection_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM supply_projections WHERE projection_id = {self._ph}",
+            (projection_id,),
+        )
+        return self._projection_row(rows[0]) if rows else None
+
+    def list_projections(self, product=None, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM supply_projections WHERE 1=1", []
+        for column, value in (("product", product), ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY product, crop_year, season, basis_month", tuple(params))
+        return [self._projection_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
