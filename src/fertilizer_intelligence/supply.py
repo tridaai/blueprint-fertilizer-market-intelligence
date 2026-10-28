@@ -957,6 +957,20 @@ def diff_assumptions(old_set: dict, new_set: dict) -> list[dict]:
                     f"{entry['expected_month']}, {entry['quantity_tonnes']} tonnes"
                 ),
             })
+    old_slipped = {s["shipment_id"]: s for s in old_set["slipped_shipments"]}
+    for shipment_id in sorted(old_slipped):
+        if shipment_id in in_basis:
+            landed = in_basis[shipment_id]
+            changes.append({
+                "kind": "landed_after_slip",
+                "shipment_id": shipment_id,
+                "detail": (
+                    f"expected {old_slipped[shipment_id]['expected_month']}; "
+                    f"arrived {landed['arrived_month']} after slipping past "
+                    "the previous basis — its tonnes are in the basis "
+                    "stock now"
+                ),
+            })
     return changes
 
 
