@@ -846,6 +846,124 @@ class MarketStore:
         )
         return [self._share_movement_row(row) for row in rows]
 
+    # -- Round 7: field signal reports, review acts, assessments --
+    # Reports land from the mobile intake sync (or the planted
+    # promotion) as artefacts keyed by their submission; review
+    # acts are insert-only and the state is their fold, so no
+    # state column exists here. Assessments are computed
+    # artefacts. All insert-only, superseding by link, the full
+    # artefact as a JSON payload.
+
+    def insert_field_report_artefact(self, report: dict) -> None:
+        self._insert_many(
+            "field_signal_reports",
+            ["report_id", "submission_id", "payload_hash", "reporter",
+             "district_id", "product", "signal_type", "signal_kind",
+             "observed_on", "crop_year", "season", "source", "as_of",
+             "conflicts_with", "payload"],
+            [(
+                report["report_id"], report["submission_id"],
+                report["payload_hash"], report["reporter"],
+                report["district_id"], report["product"],
+                report["signal_type"], report["signal_kind"],
+                report["observed_on"], report["crop_year"],
+                report["season"], report["source"], report["as_of"],
+                report["conflicts_with"], json.dumps(report),
+            )],
+        )
+
+    def _field_report_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_field_report_artefact(self, report_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM field_signal_reports WHERE report_id = {self._ph}",
+            (report_id,),
+        )
+        return self._field_report_row(rows[0]) if rows else None
+
+    def list_field_report_artefacts(
+        self, submission_id=None, district_id=None, product=None
+    ) -> list[dict]:
+        sql, params = "SELECT * FROM field_signal_reports WHERE 1=1", []
+        for column, value in (
+            ("submission_id", submission_id), ("district_id", district_id),
+            ("product", product),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY submission_id, report_id", tuple(params)
+        )
+        return [self._field_report_row(row) for row in rows]
+
+    def insert_field_review_act(self, act: dict) -> None:
+        self._insert_many(
+            "field_review_acts",
+            ["act_id", "report_id", "act", "actor", "reason", "note", "as_of"],
+            [(
+                act["act_id"], act["report_id"], act["act"], act["actor"],
+                act["reason"], act["note"], act["as_of"],
+            )],
+        )
+
+    def list_field_review_acts(self, report_id: str) -> list[dict]:
+        return self._rows(
+            f"SELECT * FROM field_review_acts WHERE report_id = {self._ph} "
+            "ORDER BY act_id",
+            (report_id,),
+        )
+
+    def insert_field_assessment(self, assessment: dict) -> None:
+        self._insert_many(
+            "field_signal_assessments",
+            ["assessment_id", "district_id", "product", "crop_year",
+             "season", "as_of", "estimate_id", "base_tonnes",
+             "adjustment_pct", "adjusted_tonnes", "rules_version",
+             "fact_fingerprint", "supersedes", "payload"],
+            [(
+                assessment["assessment_id"], assessment["district_id"],
+                assessment["product"], assessment["crop_year"],
+                assessment["season"], assessment["as_of"],
+                assessment["estimate_id"], assessment["base_tonnes"],
+                assessment["adjustment_pct"], assessment["adjusted_tonnes"],
+                assessment["rules_version"], assessment["fact_fingerprint"],
+                assessment["supersedes"], json.dumps(assessment),
+            )],
+        )
+
+    def _field_assessment_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_field_assessment(self, assessment_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM field_signal_assessments WHERE assessment_id = {self._ph}",
+            (assessment_id,),
+        )
+        return self._field_assessment_row(rows[0]) if rows else None
+
+    def list_field_assessments(
+        self, district_id=None, product=None, crop_year=None, season=None,
+        as_of=None,
+    ) -> list[dict]:
+        sql, params = "SELECT * FROM field_signal_assessments WHERE 1=1", []
+        for column, value in (
+            ("district_id", district_id), ("product", product),
+            ("crop_year", crop_year), ("season", season), ("as_of", as_of),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY district_id, product, crop_year, season, as_of, "
+            "assessment_id",
+            tuple(params),
+        )
+        return [self._field_assessment_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
