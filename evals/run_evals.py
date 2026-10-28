@@ -36,8 +36,27 @@ Round 2 adds the demand-engine counters (all zero-tolerance):
                                    the store's back that the verifier
                                    did not catch
 
-Later rounds extend this gate: alert truth (R3), supply gaps (R4),
-spike/delay grading depth (R12).
+Round 3 adds the price-watch counters (all zero-tolerance):
+  - missed_planted_alerts ........ a firing in the hand-derived
+                                   truth set that the watch missed
+  - false_alerts ................. a stored alert outside the
+                                   truth set, or one the verifier
+                                   cannot re-perform from its
+                                   movements
+  - duplicate_alerts ............. a second firing pass that stored
+                                   or fired anything new, or two
+                                   alerts for the same series, rule
+                                   and period
+  - state_edits_outside_acts ..... an alert row altered by an act
+                                   (state lives only in the acts),
+                                   or a state column on the alerts
+                                   table at all
+  - alert_without_movement ....... an alert whose triggering
+                                   movements are missing or absent
+                                   from the store
+
+Later rounds extend this gate: supply gaps (R4), spike/delay
+grading depth (R12).
 """
 
 from __future__ import annotations
@@ -257,7 +276,95 @@ def main() -> int:
     if not service.verify_estimate(victim["estimate_id"]):
         counters["estimate_tamper_undetected"] += 1
 
-    print("Round 1+2 evals — fertilizer market intelligence")
+    # --- Round 3: the price watch --------------------------------------
+    counters.update({
+        "missed_planted_alerts": 0,
+        "false_alerts": 0,
+        "duplicate_alerts": 0,
+        "state_edits_outside_acts": 0,
+        "alert_without_movement": 0,
+    })
+    # The firing truth over the planted series, derived by hand
+    # from the stored prices under the pack's stated thresholds:
+    # the September 2025 DAP spike and its unwind, the post-shock
+    # baseline dislocation, and seven sustained drifts. Every
+    # other series sits inside the pack's quiet bands.
+    expected_alerts = {
+        ("feedstock", "AMMONIA", "sustained_move", "2024-10", "watch"),
+        ("product", "DAP", "spike", "2025-09", "alert"),
+        ("product", "DAP", "mom_move", "2025-09", "alert"),
+        ("product", "DAP", "baseline_move", "2025-09", "alert"),
+        ("product", "DAP", "mom_move", "2025-10", "alert"),
+        ("product", "DAP", "baseline_move", "2025-10", "watch"),
+        ("product", "DAP", "mom_move", "2025-11", "alert"),
+        ("product", "DAP", "baseline_move", "2025-11", "watch"),
+        ("product", "DAP", "baseline_move", "2025-12", "watch"),
+        ("product", "DAP", "baseline_move", "2026-01", "watch"),
+        ("product", "DAP", "baseline_move", "2026-02", "watch"),
+        ("product", "DAP", "baseline_move", "2026-03", "watch"),
+        ("product", "GLYPHOSATE", "sustained_move", "2025-09", "watch"),
+        ("product", "MOP", "sustained_move", "2025-03", "watch"),
+        ("product", "NPK_10_26_26", "sustained_move", "2024-10", "watch"),
+        ("product", "NPK_10_26_26", "sustained_move", "2025-08", "watch"),
+        ("product", "UREA", "sustained_move", "2025-01", "watch"),
+        ("product", "UREA", "sustained_move", "2025-06", "watch"),
+    }
+    service.run_price_watch(as_of)
+    fired = service.list_alerts()
+    got_alerts = {
+        (a["series_kind"], a["item"], a["rule_id"], a["period_month"], a["band"])
+        for a in fired
+    }
+    counters["missed_planted_alerts"] += len(expected_alerts - got_alerts)
+    counters["false_alerts"] += len(got_alerts - expected_alerts)
+    for alert in fired:
+        if service.verify_alert(alert["alert_id"]):
+            counters["false_alerts"] += 1
+        if not alert["movement_ids"] or any(
+            store.get_movement(mid) is None for mid in alert["movement_ids"]
+        ):
+            counters["alert_without_movement"] += 1
+    # The spike, specifically: one DAP spike alert, September 2025,
+    # alert band — and the October decay fires no second spike.
+    spikes = [a for a in fired if a["rule_id"] == "spike"]
+    if len(spikes) != 1 or spikes[0]["period_month"] != "2025-09" or spikes[0]["band"] != "alert":
+        counters["missed_planted_alerts"] += 1
+    if any(a["rule_id"] == "spike" and a["period_month"] == "2025-10" for a in fired):
+        counters["false_alerts"] += 1
+
+    # Idempotency: a second pass over unchanged prices is a no-op,
+    # and no (series, rule, period) carries two alerts.
+    second = service.run_price_watch(as_of)
+    if second["movements_stored"] or second["alerts_fired"]:
+        counters["duplicate_alerts"] += 1
+    keys = [(a["series_kind"], a["item"], a["rule_id"], a["period_month"]) for a in fired]
+    counters["duplicate_alerts"] += len(keys) - len(set(keys))
+
+    # State lives only in acts: the alerts table has no state
+    # column, and recording acts leaves the alert row itself
+    # byte-identical while the derived state moves.
+    raw = sqlite3.connect(settings.sqlite_path)
+    columns = [r[1] for r in raw.execute("PRAGMA table_info(price_alerts)")]
+    raw.close()
+    if "state" in columns:
+        counters["state_edits_outside_acts"] += 1
+    if spikes:
+        spike_alert = spikes[0]
+        row_before = store.get_alert(spike_alert["alert_id"])
+        acked = service.acknowledge_alert(
+            spike_alert["alert_id"], actor="eval.desk@kaveri.example",
+            note="Eval pass: acknowledging the planted spike.", as_of=as_of,
+        )
+        if acked["state"] != "acknowledged" or store.get_alert(spike_alert["alert_id"]) != row_before:
+            counters["state_edits_outside_acts"] += 1
+        closed = service.close_alert(
+            spike_alert["alert_id"], actor="eval.desk@kaveri.example",
+            closing_reason="explained_by_event", as_of=as_of,
+        )
+        if closed["state"] != "closed" or store.get_alert(spike_alert["alert_id"]) != row_before:
+            counters["state_edits_outside_acts"] += 1
+
+    print("Round 1+2+3 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
