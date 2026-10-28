@@ -625,6 +625,89 @@ class MarketStore:
         rows = self._rows(sql + " ORDER BY product, crop_year, season, basis_month", tuple(params))
         return [self._projection_row(row) for row in rows]
 
+    # -- Round 5: policy registry events, impact notes -----------
+    # Registrations and notes are artefacts, not facts: computed
+    # or recorded against the facts, insert-only, superseding by
+    # link, the full artefact carried as a JSON payload.
+
+    def insert_policy_registration(self, event: dict) -> None:
+        self._insert_many(
+            "policy_registry_events",
+            ["registry_id", "event_id", "fact_event_id", "event_class",
+             "fact_kind", "title", "effective_from_month",
+             "effective_to_month", "products", "districts", "hypothetical",
+             "source", "recorded_on", "registered_by", "rules_version",
+             "fact_fingerprint", "as_of", "supersedes", "payload"],
+            [(
+                event["registry_id"], event["event_id"],
+                event["fact_event_id"], event["event_class"],
+                event["fact_kind"], event["title"],
+                event["effective_from_month"], event["effective_to_month"],
+                json.dumps(event["products"]), json.dumps(event["districts"]),
+                int(event["hypothetical"]), event["source"],
+                event["recorded_on"], event["registered_by"],
+                event["rules_version"], event["fact_fingerprint"],
+                event["as_of"], event["supersedes"], json.dumps(event),
+            )],
+        )
+
+    def _policy_event_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_policy_registration(self, registry_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM policy_registry_events WHERE registry_id = {self._ph}",
+            (registry_id,),
+        )
+        return self._policy_event_row(rows[0]) if rows else None
+
+    def list_policy_registrations(self, event_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM policy_registry_events WHERE 1=1", []
+        if event_id is not None:
+            sql += f" AND event_id = {self._ph}"
+            params.append(event_id)
+        rows = self._rows(
+            sql + " ORDER BY event_id, effective_from_month, registry_id",
+            tuple(params),
+        )
+        return [self._policy_event_row(row) for row in rows]
+
+    def insert_policy_impact_note(self, note: dict) -> None:
+        self._insert_many(
+            "policy_impact_notes",
+            ["note_id", "registry_id", "event_id", "status", "demand_count",
+             "price_point_count", "position_count", "rules_version",
+             "fact_fingerprint", "as_of", "supersedes", "payload"],
+            [(
+                note["note_id"], note["registry_id"], note["event_id"],
+                note["status"], len(note["demand_estimate_ids"]),
+                sum(s["point_count"] for s in note["price_series"]),
+                len(note["position_ids"]), note["rules_version"],
+                note["fact_fingerprint"], note["as_of"], note["supersedes"],
+                json.dumps(note),
+            )],
+        )
+
+    def _impact_note_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_policy_impact_note(self, note_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM policy_impact_notes WHERE note_id = {self._ph}",
+            (note_id,),
+        )
+        return self._impact_note_row(rows[0]) if rows else None
+
+    def list_policy_impact_notes(self, registry_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM policy_impact_notes WHERE 1=1", []
+        if registry_id is not None:
+            sql += f" AND registry_id = {self._ph}"
+            params.append(registry_id)
+        rows = self._rows(sql + " ORDER BY registry_id, note_id", tuple(params))
+        return [self._impact_note_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
