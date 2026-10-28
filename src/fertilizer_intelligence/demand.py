@@ -163,9 +163,18 @@ def _fingerprint(material) -> str:
 # -- the engine -------------------------------------------------------------
 
 
-def compute_estimate(store, district_id, product, crop_year, season, as_of) -> DemandEstimate:
+def compute_estimate(store, district_id, product, crop_year, season, as_of,
+                     elasticity_override=None) -> DemandEstimate:
     """Compute (but do not store) the estimate artefact for one
-    district × product × season, from stored facts only."""
+    district × product × season, from stored facts only.
+
+    ``elasticity_override`` is the R9 scenario fork's stated
+    lever: when given, the price line runs with that
+    elasticity instead of the pack's, records the pack value
+    as its base on the line inputs, and fingerprints the
+    override — the estimate is then a fork's result, never a
+    head. Base estimates pass no override and are computed
+    exactly as before."""
     if product not in PRODUCTS:
         raise ValueError(f"unknown product: {product!r}")
     area_rows = store.area_facts(district_id, crop_year, season)
@@ -262,6 +271,9 @@ def compute_estimate(store, district_id, product, crop_year, season, as_of) -> D
     cur_points = [[m, price_map[m]] for m in cur_months if m in price_map]
     prior_points = [[m, price_map[m]] for m in prior_months if m in price_map]
     elasticity = rules.PRICE_ELASTICITY[product]
+    if elasticity_override is not None:
+        elasticity = elasticity_override
+        consumed.append(["elasticity_override", elasticity_override])
     if len(cur_points) < rules.MIN_WINDOW_MONTHS or len(prior_points) < rules.MIN_WINDOW_MONTHS:
         lines.append({
             "line_no": 3, "driver": DRIVER_PRICE, "status": "missing",
@@ -284,6 +296,9 @@ def compute_estimate(store, district_id, product, crop_year, season, as_of) -> D
             "factor": 1.0 + elasticity * change,
             "inputs": {
                 "elasticity": elasticity,
+                **({"elasticity_base": rules.PRICE_ELASTICITY[product],
+                    "elasticity_source": "scenario_lever"}
+                   if elasticity_override is not None else {}),
                 "current_points": cur_points, "prior_points": prior_points,
                 "current_mean": round(cur_mean, 4), "prior_mean": round(prior_mean, 4),
                 "change_pct": round(change, 6),

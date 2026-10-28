@@ -17,6 +17,7 @@ from . import field as field_engine
 from . import field_rules as field_pack
 from . import movements as movement_engine
 from . import policy as policy_engine
+from . import scenario as scenario_engine
 from . import share as share_engine
 from . import supply as supply_engine
 from .config import Settings, load_settings
@@ -1028,6 +1029,241 @@ class MarketService:
                 f"{len(refusals)} parse refusals are recorded but only "
                 f"{len(gap_refusals)} gap panels carry them")
         return {"spec_id": spec_id, "verified": not problems,
+                "problems": problems}
+
+    # -- Round 9: scenario forks & planning options --------------------
+    # A fork is a pinned, hypothetical view of a head
+    # artefact. Creating one never writes to a head table:
+    # the engines run over a substituted fact view and only
+    # the fork artefact itself is stored.
+
+    def _scenario_base(self, kind: str, scope: dict,
+                       as_of: str | None = None) -> dict:
+        """The base artefact a fork pins: the head of record
+        for the cell. A fork never silently strikes a new
+        head at an invented date — with an explicit as_of it
+        strikes (or returns) the head at that date through
+        the ordinary surfaces; without one it takes the
+        stored head, and a cell with no head on record is a
+        refusal that says so."""
+        if kind == "demand_estimate":
+            if as_of is not None:
+                estimate = self.estimate_demand(
+                    scope["district_id"], scope["product"],
+                    scope["crop_year"], scope["season"], as_of)
+            else:
+                estimate = supply_engine.head_of(
+                    self.store.list_estimates(
+                        scope["district_id"], scope["product"],
+                        scope["crop_year"], scope["season"]),
+                    "estimate_id")
+                if estimate is None:
+                    raise ValueError(
+                        "no head estimate is on record for "
+                        f"{scope['district_id']} {scope['product']} "
+                        f"{scope['crop_year']} {scope['season']} — "
+                        "strike one (or pass as_of) before forking it")
+            return {**estimate,
+                    "contributions": self.store.estimate_contributions(
+                        estimate["estimate_id"])}
+        if as_of is not None:
+            return self.supply_projection(
+                scope["product"], scope["crop_year"], scope["season"],
+                as_of)
+        projection = supply_engine.head_of(
+            self.store.list_projections(
+                scope["product"], scope["crop_year"], scope["season"]),
+            "projection_id")
+        if projection is None:
+            raise ValueError(
+                "no head projection is on record for "
+                f"{scope['product']} {scope['crop_year']} "
+                f"{scope['season']} — strike one (or pass as_of) "
+                "before forking it")
+        return projection
+
+    def create_scenario(self, kind: str, scope: dict, levers: list[dict],
+                        created_by: str, name: str | None = None,
+                        as_of: str | None = None) -> dict:
+        """Fork a head artefact with structured lever specs.
+        Every spec is validated against the catalogue —
+        an out-of-bounds or wrong-kind lever refuses the
+        whole fork, naming the bound."""
+        base = self._scenario_base(kind, scope, as_of)
+        records = scenario_engine.resolve_levers(
+            self.store, kind, scope, base, levers)
+        return self._store_fork(kind, scope, base, records, [],
+                                {"profile": "structured", "model": None,
+                                 "rules": [], "refusals": [], "notes": []},
+                                created_by, name)
+
+    def ask_scenario(self, question: str, asked_by: str,
+                     name: str | None = None) -> dict:
+        """Fork from a plain-language request through the
+        model port. The offline profile parses with the
+        deterministic grammar and pins the fork to the
+        question's date; parts that cannot be mapped become
+        named gaps on the artefact — never dropped, never
+        improvised."""
+        base = self._scenario_base(
+            *scenario_engine.scan_scope(self.store, question)[:2])
+        if self.settings.model_profile == "offline":
+            kind, scope, records, gaps, parse = \
+                scenario_engine.parse_scenario_grammar(
+                    self.store, question, base)
+        else:
+            kind, scope, records, gaps, parse = \
+                scenario_engine.parse_scenario_model(
+                    self.store, self.model, question, base)
+        base = self._scenario_base(kind, scope)
+        return self._store_fork(kind, scope, base, records, gaps, parse,
+                                asked_by, name)
+
+    def _store_fork(self, kind, scope, base, records, gaps, parse,
+                    created_by, name) -> dict:
+        if kind == "demand_estimate":
+            result, reconciliation = scenario_engine.compute_demand_fork(
+                self.store, base, records)
+        else:
+            result, reconciliation = \
+                scenario_engine.compute_projection_fork(
+                    self.store, base, records)
+        fork = scenario_engine.build_fork(
+            kind, scope, base, records, gaps, parse, created_by, name,
+            result, reconciliation)
+        existing = self.store.get_scenario_fork(fork.fork_id)
+        if existing is not None:
+            return existing
+        self.store.insert_scenario_fork(fork.model_dump())
+        return fork.model_dump()
+
+    def get_scenario(self, fork_id) -> dict | None:
+        return self.store.get_scenario_fork(fork_id)
+
+    def list_scenarios(self, base_artefact_id=None) -> list[dict]:
+        return self.store.list_scenario_forks(base_artefact_id=base_artefact_id)
+
+    def verify_scenario(self, fork_id) -> dict:
+        fork = self.store.get_scenario_fork(fork_id)
+        if fork is None:
+            raise ValueError(f"no such scenario fork: {fork_id}")
+        problems = scenario_engine.verify_fork(self.store, fork)
+        return {"fork_id": fork_id, "verified": not problems,
+                "problems": problems}
+
+    def build_planning_options(self, base_artefact_id: str,
+                               fork_ids: list[str], created_by: str,
+                               name: str | None = None) -> dict:
+        """Compare a base artefact and its forks side by
+        side. Every fork must fork THIS base; the comparison
+        is struck at the base's date and ranked only by the
+        pack's stated criteria."""
+        forks = []
+        for fork_id in fork_ids:
+            fork = self.store.get_scenario_fork(fork_id)
+            if fork is None:
+                raise ValueError(f"no such scenario fork: {fork_id}")
+            if fork["base_artefact_id"] != base_artefact_id:
+                raise ValueError(
+                    f"fork {fork_id} forks {fork['base_artefact_id']}, "
+                    f"not {base_artefact_id} — a comparison holds "
+                    "forks of one base only")
+            forks.append(fork)
+        if not forks:
+            raise ValueError(
+                "a comparison needs at least one fork — the base "
+                "alone is the head artefact, not an option set")
+        kind = forks[0]["kind"]
+        if any(f["kind"] != kind for f in forks):
+            raise ValueError("all forks in one comparison share one kind")
+        if kind == "demand_estimate":
+            base = self.store.get_estimate(base_artefact_id)
+            if base is None:
+                raise ValueError(
+                    f"no such base estimate: {base_artefact_id}")
+            base = {**base, "contributions":
+                    self.store.estimate_contributions(base_artefact_id)}
+        else:
+            base = self.store.get_projection(base_artefact_id)
+            if base is None:
+                raise ValueError(
+                    f"no such base projection: {base_artefact_id}")
+            # The comparison's gap reading stands on the
+            # season outlook's demand rollup — strike it
+            # through the ordinary surface when none is on
+            # record yet.
+            if self.get_outlook(base["crop_year"], base["season"]) is None:
+                self.demand_outlook(base["crop_year"], base["season"],
+                                    base["as_of"])
+        scope = forks[0]["scope"]
+        options = scenario_engine.compute_options(
+            self.store, kind, scope, base, forks, created_by,
+            base["as_of"], name)
+        existing = self.store.get_planning_options(options.options_id)
+        if existing is not None:
+            return existing
+        self.store.insert_planning_options(options.model_dump())
+        return options.model_dump()
+
+    def get_planning_options(self, options_id) -> dict | None:
+        return self.store.get_planning_options(options_id)
+
+    def list_planning_options(self, base_artefact_id=None) -> list[dict]:
+        return self.store.list_planning_options(base_artefact_id)
+
+    def verify_planning_options(self, options_id) -> dict:
+        options = self.store.get_planning_options(options_id)
+        if options is None:
+            raise ValueError(f"no such planning options: {options_id}")
+        problems = scenario_engine.verify_options(self.store, options)
+        return {"options_id": options_id, "verified": not problems,
+                "problems": problems}
+
+    def adopt_option(self, options_id: str, fork_id: str | None,
+                     adopted_by: str, as_of: str,
+                     note: str | None = None) -> dict:
+        """Adopt one row of a comparison — the base view
+        (fork_id None) or one of its forks — as the option
+        the plan follows. The act is insert-only and
+        supersedes the chain's previous head by link; it
+        edits no artefact. An unnamed adoption is refused:
+        a plan follows a fork because a named planner said
+        so, or it does not follow it."""
+        if not adopted_by or not adopted_by.strip():
+            raise ValueError(
+                "an adoption names its planner — an unnamed "
+                "adoption is refused")
+        options = self.store.get_planning_options(options_id)
+        if options is None:
+            raise ValueError(f"no such planning options: {options_id}")
+        if fork_id is not None and fork_id not in options["fork_ids"]:
+            raise ValueError(
+                f"fork {fork_id} is not a row of {options_id} — only "
+                "a compared option can be adopted")
+        chain = self.store.list_planning_adoptions(options_id)
+        head = scenario_engine.head_adoption(chain)
+        adoption = scenario_engine.build_adoption(
+            options, fork_id, adopted_by, note, as_of,
+            head["adoption_id"] if head else None)
+        existing = self.store.get_planning_adoption(adoption.adoption_id)
+        if existing is not None:
+            return existing
+        self.store.insert_planning_adoption(adoption.model_dump())
+        return adoption.model_dump()
+
+    def current_adoption(self, options_id) -> dict | None:
+        return scenario_engine.head_adoption(
+            self.store.list_planning_adoptions(options_id))
+
+    def list_adoptions(self, options_id) -> list[dict]:
+        return self.store.list_planning_adoptions(options_id)
+
+    def verify_adoption(self, adoption_id) -> dict:
+        adoption = self.store.get_planning_adoption(adoption_id)
+        if adoption is None:
+            raise ValueError(f"no such planning adoption: {adoption_id}")
+        problems = scenario_engine.verify_adoption(self.store, adoption)
+        return {"adoption_id": adoption_id, "verified": not problems,
                 "problems": problems}
 
     def ready(self) -> bool:
