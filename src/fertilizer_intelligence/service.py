@@ -13,6 +13,7 @@ import logging
 from . import alert_rules as alert_pack
 from . import demand as demand_engine
 from . import movements as movement_engine
+from . import policy as policy_engine
 from . import supply as supply_engine
 from .config import Settings, load_settings
 from .generator import PRODUCTS, load_dataset
@@ -253,10 +254,21 @@ class MarketService:
             alert_id, "close", actor, as_of, closing_reason=closing_reason
         )
 
+    def _policy_markers(self) -> dict[str, list[dict]]:
+        """The board's policy markers, from the current registry
+        heads: real events whose window covers the reference
+        month, by series item."""
+        heads = policy_engine.heads_by_event(
+            self.store.list_policy_registrations()
+        )
+        return policy_engine.board_markers(self.store, list(heads.values()))
+
     def series_watch(self, series_kind, item) -> dict:
         """One series' watch read, computed from its artefacts:
         the latest movement, its open alerts, and the band those
-        open alerts put it in."""
+        open alerts put it in — plus any policy markers the
+        registry currently lays on the series (typed separately
+        from alerts, never counted as alerts)."""
         movements = self.store.list_movements(series_kind, item)
         alerts = self.list_alerts(series_kind, item)
         open_alerts = [a for a in alerts if a["state"] != "closed"]
@@ -269,16 +281,23 @@ class MarketService:
             "latest_movement": movements[-1] if movements else None,
             "open_alerts": open_alerts,
             "band": band,
+            "policy_markers": self._policy_markers().get(item, []),
         }
 
     def watch_board(self) -> list[dict]:
         """Every tracked series by band — the board a product or
         strategy team scans. Computed from artefacts, sorted so
-        alert-band series come first."""
+        alert-band series come first. A row also carries the
+        policy markers the registry lays on the series: current,
+        real policy events whose window is open at the board's
+        reference month. Markers are not alerts and never enter
+        the alert counts."""
+        markers = self._policy_markers()
         board = []
         for series_kind, item in self._price_series():
             watch = self.series_watch(series_kind, item)
             latest = watch["latest_movement"]
+            row_markers = markers.get(item, [])
             board.append({
                 "series_kind": series_kind, "item": item,
                 "band": watch["band"],
@@ -286,6 +305,8 @@ class MarketService:
                 "latest_month": latest["month"] if latest else None,
                 "latest_mom_pct": latest["mom_pct"] if latest else None,
                 "latest_baseline_pct": latest["baseline_pct"] if latest else None,
+                "policy_markers": row_markers,
+                "policy_marker_count": len(row_markers),
             })
         board.sort(key=lambda r: (-alert_pack.BAND_RANK[r["band"]], r["series_kind"], r["item"]))
         return board
@@ -416,6 +437,133 @@ class MarketService:
         if head is None:
             return [f"no supply projection stored for {product} {crop_year} {season}"]
         return supply_engine.verify_projection(self.store, head)
+
+    # -- policy registry (R5) ------------------------------------
+
+    def register_policy_events(self, as_of) -> dict:
+        """The registration pass over the recorded policy facts:
+        each fact becomes a registry artefact under the pack's
+        mapping. Idempotent — a fact whose registration is
+        already the head is left exactly as it is; a changed
+        mapping would store a new registration superseding the
+        head by link."""
+        registered = already = 0
+        for fact in self.store.policy_events():
+            artefact = policy_engine.registration_from_fact(fact, as_of)
+            head = policy_engine.head_of(
+                self.store.list_policy_registrations(fact["event_id"]),
+                "registry_id",
+            )
+            if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+                already += 1
+                continue
+            artefact = artefact.model_copy(
+                update={"supersedes": head["registry_id"] if head else None}
+            )
+            self.store.insert_policy_registration(artefact.model_dump())
+            log.info("policy event registered: %s", artefact.registry_id)
+            registered += 1
+        heads = policy_engine.heads_by_event(self.store.list_policy_registrations())
+        return {
+            "as_of": as_of,
+            "registered": registered,
+            "already_registered": already,
+            "events_total": len(heads),
+        }
+
+    def register_policy_event(self, spec: dict, as_of) -> dict:
+        """Register one event stated at the desk (a new event, a
+        correction, or a hypothetical proposal), validated
+        against the pack. Same content as the current head is a
+        no-op returning the head; different content stores a new
+        registration superseding the head by link — the only way
+        a hypothetical becomes real, or a scope gets corrected."""
+        district_ids = {d["district_id"] for d in self.store.list_districts()}
+        artefact = policy_engine.build_registration(spec, district_ids, as_of)
+        head = policy_engine.head_of(
+            self.store.list_policy_registrations(artefact.event_id), "registry_id"
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["registry_id"] if head else None}
+        )
+        self.store.insert_policy_registration(artefact.model_dump())
+        log.info("policy event registered at the desk: %s", artefact.registry_id)
+        return self.store.get_policy_registration(artefact.registry_id)
+
+    def get_policy_event(self, registry_id) -> dict | None:
+        return self.store.get_policy_registration(registry_id)
+
+    def list_policy_events(self, hypothetical=None, event_class=None) -> list[dict]:
+        """The current registration per event id (chain heads),
+        optionally filtered — hypothetical proposals and real
+        events list separately when the flag filter is given."""
+        heads = policy_engine.heads_by_event(
+            self.store.list_policy_registrations()
+        )
+        out = [heads[event_id] for event_id in sorted(heads)]
+        if hypothetical is not None:
+            out = [e for e in out if e["hypothetical"] == hypothetical]
+        if event_class is not None:
+            out = [e for e in out if e["event_class"] == event_class]
+        return out
+
+    def policy_event_versions(self, event_id) -> list[dict]:
+        """Every recorded version of one event id, oldest link
+        first — the chain a supersession walked."""
+        return self.store.list_policy_registrations(event_id)
+
+    def verify_policy_event(self, registry_id) -> list[str]:
+        row = self.store.get_policy_registration(registry_id)
+        if row is None:
+            return [f"no such policy registration: {registry_id}"]
+        return policy_engine.verify_policy_event(self.store, row)
+
+    def policy_impact(self, registry_id, as_of) -> dict:
+        """Compute-or-return the impact note for one registry
+        event: the demand outlooks and position chains the note
+        can name are ensured first, then the scope query runs
+        over the stored heads. A hypothetical is refused — a
+        proposed policy earns no note."""
+        event = self.store.get_policy_registration(registry_id)
+        if event is None:
+            raise ValueError(f"no such policy registration: {registry_id}")
+        if event["hypothetical"]:
+            raise ValueError(
+                f"policy event {event['event_id']} is hypothetical: a "
+                "proposed policy earns no impact note — it is listed "
+                "with its stated effect only"
+            )
+        for crop_year, season in policy_engine.overlapping_seasons(event):
+            self.demand_outlook(crop_year, season, as_of)
+        positionable = supply_engine.positionable_products(self.store)
+        for product in event["products"]:
+            if product in positionable:
+                self._position_chain(product, as_of)
+        artefact = policy_engine.compute_impact_note(self.store, event, as_of)
+        head = policy_engine.head_of(
+            self.store.list_policy_impact_notes(registry_id), "note_id"
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["note_id"] if head else None}
+        )
+        self.store.insert_policy_impact_note(artefact.model_dump())
+        log.info("policy impact note stored: %s", artefact.note_id)
+        return self.store.get_policy_impact_note(artefact.note_id)
+
+    def get_policy_impact(self, registry_id) -> dict | None:
+        return policy_engine.head_of(
+            self.store.list_policy_impact_notes(registry_id), "note_id"
+        )
+
+    def verify_policy_impact(self, registry_id) -> list[str]:
+        head = self.get_policy_impact(registry_id)
+        if head is None:
+            return [f"no impact note stored for registration {registry_id}"]
+        return policy_engine.verify_impact_note(self.store, head)
 
     def ready(self) -> bool:
         return self.store.get_manifest() is not None and all(
