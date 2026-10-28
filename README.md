@@ -744,14 +744,16 @@ src/fertilizer_intelligence/
   field.py           signal landing, review fold, weighting assessments
   dashboard_rules.py the versioned dashboard pack (panel vocabulary, defaults, role defaults)
   dashboard.py       question parsing, dashboard specs, assembly, verification, rendering
+  scenario_rules.py  the versioned scenario pack (lever catalogue, ranking criteria)
+  scenario.py        scenario forks, planning options, adoptions, verifiers
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0008 in sqlite + postgres dialects
+migrations/          0001-0009 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md

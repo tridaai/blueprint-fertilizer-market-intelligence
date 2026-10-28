@@ -246,10 +246,11 @@ class ForkStoreView:
         return out
 
 
-def view_from_levers(store, levers: list[dict]) -> ForkStoreView:
-    """Rebuild the exact view a fork's applied lever
-    records describe — creation and verification build
-    the view the same way, from the artefact alone."""
+def view_from_levers(store, levers: list[dict]):
+    """Rebuild the exact view a fork's lever records
+    describe, plus the elasticity override if one is among
+    them — creation and verification build the view the
+    same way, from the artefact alone."""
     monsoon = price = production = None
     imports: dict[str, int] = {}
     elasticity = None
