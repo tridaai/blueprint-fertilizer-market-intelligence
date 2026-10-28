@@ -57,6 +57,32 @@ def main() -> int:
     mismatches = sum(1 for k, v in stored.items() if abs(derived.get(k, 0.0) - v) > 0.01)
     print(f"Consumption re-derived from stored inputs: {len(stored)} figures, "
           f"{mismatches} mismatches")
+
+    print("\n--- Round 2: the demand engine ---")
+    est = service.estimate_demand("DST-LUD", "DAP", "2025-26", "kharif", "2026-04-15")
+    print(f"\nEstimate {est['estimate_id']} — Ludhiana DAP, kharif 2025-26 ({est['status']}):")
+    for line in est["contributions"]:
+        factor = f"x{line['factor']:.4f}" if line["factor"] is not None else "  —  "
+        print(f"  {line['driver']:<22} {line['status']:<14} {factor}  "
+              f"delta {line['delta_tonnes']:>10.3f}  -> {line['value_after_tonnes']:>10.3f} t")
+    print(f"  total {est['total_tonnes']:.3f} t; re-performance problems: "
+          f"{service.verify_estimate(est['estimate_id'])}")
+
+    partial = service.estimate_demand("DST-LUD", "DAP", "2024-25", "kharif", "2026-04-15")
+    print(f"\nThe same estimate for 2024-25 is {partial['status']}: missing drivers "
+          f"{partial['missing_drivers']} — named, never substituted.")
+
+    outlook = service.demand_outlook("2025-26", "kharif", "2026-04-15")
+    print(f"\nOutlook {outlook['outlook_id']} — kharif 2025-26: {outlook['estimate_count']} "
+          f"estimates, {outlook['partial_count']} partial, total {outlook['total_tonnes']:.3f} t")
+    for product, tonnes in sorted(outlook["product_rollups"].items()):
+        print(f"  {product:<14} {tonnes:>12.3f} t")
+    print(f"  rollup verification problems: {service.verify_outlook(outlook['outlook_id'])}")
+
+    narrative = service.draft_outlook_narrative("2025-26", "kharif", "2026-04-15")
+    print(f"\nOutlook narrative ({narrative['model_profile']}/{narrative['model_name']}), "
+          "figure-verified before it was stored:")
+    print(narrative["text"])
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
