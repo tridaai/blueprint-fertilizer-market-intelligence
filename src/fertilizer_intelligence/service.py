@@ -12,6 +12,8 @@ import logging
 
 from . import alert_rules as alert_pack
 from . import demand as demand_engine
+from . import field as field_engine
+from . import field_rules as field_pack
 from . import movements as movement_engine
 from . import policy as policy_engine
 from . import share as share_engine
@@ -732,6 +734,155 @@ class MarketService:
         if row is None:
             return [f"no such share movement: {movement_id}"]
         return share_engine.verify_movement(self.store, row)
+
+    # -- field signals & mobile intake (R7) -------------------
+
+    def sync_field_reports(self, submissions, as_of) -> dict:
+        """Land one outbox batch: each submission validated at
+        the port, then landed exactly once. A submission the
+        port refuses stops the batch with its reason — the
+        submissions before it stay landed (that is the
+        killed-mid-sync shape), and re-sending the whole batch
+        is always safe: what already landed answers duplicate."""
+        receipt = []
+        for sub in submissions:
+            field_engine.validate_submission(self.store, sub)
+            result = field_engine.land_submission(self.store, sub, as_of)
+            receipt.append({
+                "submission_id": sub["submission_id"],
+                "outcome": result["outcome"],
+                "report_id": result["report"]["report_id"],
+            })
+        return {
+            "as_of": as_of,
+            "received": len(submissions),
+            "landed": sum(1 for r in receipt if r["outcome"] == "landed"),
+            "duplicates": sum(1 for r in receipt if r["outcome"] == "duplicate"),
+            "conflicts": sum(1 for r in receipt if r["outcome"] == "conflict"),
+            "receipt": receipt,
+            "reports_total": len(self.store.list_field_report_artefacts()),
+        }
+
+    def promote_planted_field_reports(self, as_of) -> dict:
+        """Promote the twelve planted R1 field reports through
+        the same landing machinery the mobile intake uses, so
+        one lifecycle — review, weighting, conflict — covers
+        every field signal. Idempotent: a second promotion
+        lands nothing."""
+        submissions = [
+            field_engine.planted_submission(fact)
+            for fact in self.store.field_reports()
+        ]
+        return self.sync_field_reports(submissions, as_of)
+
+    def list_field_reports(self, state=None, district_id=None, product=None) -> list[dict]:
+        """Every landed report with its acts, derived review
+        state and conflict standing — optionally filtered to
+        one state (the verification queue is the unreviewed
+        filter), district or product."""
+        views = [
+            field_engine.report_view(self.store, report)
+            for report in self.store.list_field_report_artefacts(
+                district_id=district_id, product=product
+            )
+        ]
+        if state is not None:
+            views = [v for v in views if v["review_state"] == state]
+        return views
+
+    def get_field_report(self, report_id) -> dict | None:
+        row = self.store.get_field_report_artefact(report_id)
+        return field_engine.report_view(self.store, row) if row is not None else None
+
+    def verify_field_report(self, report_id) -> list[str]:
+        row = self.store.get_field_report_artefact(report_id)
+        if row is None:
+            return [f"no such field report: {report_id}"]
+        return field_engine.verify_report(self.store, row)
+
+    def review_field_report(self, report_id, act, actor, reason, as_of, note=None) -> dict:
+        """Record one reviewer act against a report. The act,
+        its reason vocabulary and the transitions the current
+        state allows are the pack's; the state itself is never
+        written — it stays the fold of the acts."""
+        report = self.store.get_field_report_artefact(report_id)
+        if report is None:
+            raise ValueError(f"no such field report: {report_id}")
+        if not actor or not actor.strip():
+            raise ValueError("a review act needs a named reviewer")
+        if act not in field_pack.ACTS:
+            raise ValueError(
+                f"review act must be one of {sorted(field_pack.ACTS)}"
+            )
+        if reason not in field_pack.ACT_REASONS[act]:
+            raise ValueError(
+                f"a {act} act's reason must be one of "
+                f"{sorted(field_pack.ACT_REASONS[act])}"
+            )
+        acts = self.store.list_field_review_acts(report_id)
+        state = field_engine.derive_review_state(acts)
+        if state == field_pack.STATE_REJECTED:
+            raise field_engine.FieldReviewError(
+                f"report {report_id} is rejected: rejection is terminal — "
+                "a corrected observation must arrive as a new report"
+            )
+        if act == field_pack.ACT_CONFIRM and state == field_pack.STATE_CONFIRMED:
+            raise field_engine.FieldReviewError(
+                f"report {report_id} is already confirmed"
+            )
+        if act == field_pack.ACT_QUERY and state == field_pack.STATE_QUERIED:
+            raise field_engine.FieldReviewError(
+                f"report {report_id} is already queried — "
+                "confirm it or reject it"
+            )
+        act_row = {
+            "act_id": f"FRA-{report_id}-{len(acts) + 1:03d}",
+            "report_id": report_id, "act": act, "actor": actor.strip(),
+            "reason": reason, "note": note, "as_of": as_of,
+        }
+        self.store.insert_field_review_act(act_row)
+        log.info("field review act recorded: %s", act_row)
+        return self.get_field_report(report_id)
+
+    def field_signal_assessment(self, district_id, product, crop_year, season, as_of) -> dict:
+        """Compute-or-return the weighting assessment for one
+        cell: the head R2 estimate is ensured first (it is
+        read, never mutated), then the cell's reports fold
+        against it under the field pack. Changed inputs — a
+        new report, a new act, a superseding estimate — store
+        a new assessment superseding the head by link."""
+        self.estimate_demand(district_id, product, crop_year, season, as_of)
+        artefact = field_engine.compute_assessment(
+            self.store, district_id, product, crop_year, season, as_of
+        )
+        head = field_engine.head_of(
+            self.store.list_field_assessments(
+                district_id, product, crop_year, season, as_of
+            ),
+            "assessment_id",
+        )
+        if head is not None and head["fact_fingerprint"] == artefact.fact_fingerprint:
+            return head
+        artefact = artefact.model_copy(
+            update={"supersedes": head["assessment_id"] if head else None}
+        )
+        self.store.insert_field_assessment(artefact.model_dump())
+        log.info("field assessment stored: %s", artefact.assessment_id)
+        return self.store.get_field_assessment(artefact.assessment_id)
+
+    def get_field_assessment(self, district_id, product, crop_year, season, as_of=None) -> dict | None:
+        return field_engine.head_of(
+            self.store.list_field_assessments(
+                district_id, product, crop_year, season, as_of
+            ),
+            "assessment_id",
+        )
+
+    def verify_field_assessment(self, assessment_id) -> list[str]:
+        row = self.store.get_field_assessment(assessment_id)
+        if row is None:
+            return [f"no such field assessment: {assessment_id}"]
+        return field_engine.verify_assessment(self.store, row)
 
     def ready(self) -> bool:
         return self.store.get_manifest() is not None and all(

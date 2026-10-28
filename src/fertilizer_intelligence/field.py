@@ -485,7 +485,8 @@ def compute_assessment(store, district_id, product, crop_year, season, as_of) ->
     })
     return FieldSignalAssessment(
         assessment_id=(
-            f"FSA-{district_id}-{product}-{crop_year}-{season}-{as_of}"
+            f"FSA-{district_id}-{product}-{crop_year}-{season}-"
+            f"{fingerprint[:10]}"
         ),
         district_id=district_id,
         product=product,
