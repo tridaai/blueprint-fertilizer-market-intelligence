@@ -1040,6 +1040,139 @@ class MarketStore:
         ).fetchall()
         return [self._assembly_row(r) for r in rows]
 
+    # -- Round 9: scenario forks, planning options, adoptions --
+    # Scenarios are hypothetical by construction and live only
+    # in these tables: no head read (estimate, gap, board,
+    # impact, dashboard of record) ever joins them. Forks and
+    # options are computed artefacts; adoptions are insert-only
+    # acts whose current state is the head of their supersedes
+    # chain. All insert-only, the full artefact as a JSON
+    # payload.
+
+    def insert_scenario_fork(self, fork: dict) -> None:
+        self._insert_many(
+            "scenario_forks",
+            ["fork_id", "fingerprint", "name", "kind",
+             "base_artefact_id", "created_by", "as_of",
+             "rules_version", "payload"],
+            [(
+                fork["fork_id"], fork["fingerprint"], fork["name"],
+                fork["kind"], fork["base_artefact_id"],
+                fork["created_by"], fork["as_of"],
+                fork["rules_version"], json.dumps(fork),
+            )],
+        )
+
+    def _scenario_fork_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_scenario_fork(self, fork_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM scenario_forks WHERE fork_id = {self._ph}",
+            (fork_id,),
+        )
+        return self._scenario_fork_row(rows[0]) if rows else None
+
+    def scenario_fork_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM scenario_forks WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._scenario_fork_row(rows[0]) if rows else None
+
+    def scenario_fork_by_name(self, name: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM scenario_forks WHERE name = {self._ph}",
+            (name,),
+        )
+        return self._scenario_fork_row(rows[0]) if rows else None
+
+    def list_scenario_forks(self, kind=None, base_artefact_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM scenario_forks WHERE 1=1", []
+        for column, value in (("kind", kind),
+                              ("base_artefact_id", base_artefact_id)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY kind, base_artefact_id, fork_id",
+                          tuple(params))
+        return [self._scenario_fork_row(row) for row in rows]
+
+    def insert_planning_options(self, options: dict) -> None:
+        self._insert_many(
+            "planning_options",
+            ["options_id", "fingerprint", "name", "kind",
+             "base_artefact_id", "created_by", "as_of",
+             "rules_version", "payload"],
+            [(
+                options["options_id"], options["fingerprint"],
+                options["name"], options["kind"],
+                options["base_artefact_id"], options["created_by"],
+                options["as_of"], options["rules_version"],
+                json.dumps(options),
+            )],
+        )
+
+    def _planning_options_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_planning_options(self, options_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM planning_options WHERE options_id = {self._ph}",
+            (options_id,),
+        )
+        return self._planning_options_row(rows[0]) if rows else None
+
+    def planning_options_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM planning_options WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._planning_options_row(rows[0]) if rows else None
+
+    def list_planning_options(self, base_artefact_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM planning_options WHERE 1=1", []
+        if base_artefact_id is not None:
+            sql += f" AND base_artefact_id = {self._ph}"
+            params.append(base_artefact_id)
+        rows = self._rows(sql + " ORDER BY base_artefact_id, options_id",
+                          tuple(params))
+        return [self._planning_options_row(row) for row in rows]
+
+    def insert_planning_adoption(self, adoption: dict) -> None:
+        self._insert_many(
+            "planning_adoptions",
+            ["adoption_id", "options_id", "fork_id", "adopted_by",
+             "as_of", "supersedes", "payload"],
+            [(
+                adoption["adoption_id"], adoption["options_id"],
+                adoption["fork_id"], adoption["adopted_by"],
+                adoption["as_of"], adoption["supersedes"],
+                json.dumps(adoption),
+            )],
+        )
+
+    def _planning_adoption_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_planning_adoption(self, adoption_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM planning_adoptions WHERE adoption_id = {self._ph}",
+            (adoption_id,),
+        )
+        return self._planning_adoption_row(rows[0]) if rows else None
+
+    def list_planning_adoptions(self, options_id: str) -> list[dict]:
+        rows = self._rows(
+            f"SELECT * FROM planning_adoptions WHERE options_id = {self._ph} "
+            "ORDER BY adoption_id",
+            (options_id,),
+        )
+        return [self._planning_adoption_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
