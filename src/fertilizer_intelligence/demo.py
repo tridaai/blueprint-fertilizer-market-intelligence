@@ -282,6 +282,73 @@ def main() -> int:
           f"{len(enacted_note['position_ids'])} positions — the same "
           "window and product scope the restriction's note named.")
 
+    print("\n--- Round 6: competitor & market-share intelligence ---")
+    built = service.build_competitor_observations()
+    print(f"\nObservation pass over the tracked competitor points: "
+          f"{built['observations_stored']} stored, "
+          f"{built['already_present']} already present, "
+          f"{built['observations_total']} observations — every one "
+          "carrying its source and observation date on its face.")
+    again = service.build_competitor_observations()
+    print(f"Second pass: {again['observations_stored']} new — the "
+          "pass is idempotent.")
+
+    share = service.market_share("DST-LUD", "DAP", "2025-26", "kharif")
+    print(f"\nMarket share, Ludhiana DAP kharif 2025-26, read at the "
+          f"season close {share['as_of']} ({share['share_id']}, status "
+          f"{share['status']}): the district's recorded market is "
+          "distributed by the north region's observed structure — "
+          "tracked competitor volumes are whole-region figures, so "
+          "raw tonnage is never allocated into a district.")
+    headline = share["headline"]
+    print(f"  {'seller':<22} {'volume t':>10}  {'of observed':>11}  "
+          f"{'of demand':>9}")
+    for seller in [headline["kaveri"]] + headline["competitors"]:
+        print(f"  {seller['seller']:<22} {seller['volume_tonnes']:>10.3f}  "
+              f"{seller['share_of_observed_market_pct']:>10.4f}%  "
+              f"{seller['share_of_total_demand_pct']:>8.4f}%")
+    print(f"  Kaveri's line is the residual the artefact names: "
+          f"{share['kaveri_basis']}")
+    print(f"  provenance: {len(share['provenance'])} observations in "
+          f"scope; verification problems: "
+          f"{service.verify_share(share['share_id'])}")
+
+    late = service.market_share(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2026-03-31")
+    print(f"\nThe same share read late, at 2026-03-31: "
+          f"{late['headline_note']} — the June–August observations "
+          "have aged past the pack's 200-day freshness window, so "
+          "the headline is computed over September–November only "
+          "and the exclusion is named on the artefact:")
+    for entry in late["headline"]["excluded_observations"][:3]:
+        print(f"  excluded {entry['observation_id']} "
+              f"(observed {entry['as_of']}, {entry['age_days']} days old)")
+    print(f"  ... and "
+          f"{len(late['headline']['excluded_observations']) - 3} more; "
+          f"the full-season reading rides alongside, labelled "
+          f"'{late['full_season']['basis']}'.")
+
+    stale = service.market_share(
+        "DST-LUD", "DAP", "2024-25", "rabi", "2026-03-31")
+    print(f"\nLudhiana DAP rabi 2024-25 read at the same late date: "
+          f"status {stale['status']} — every month is stale, so the "
+          "share reads not_current instead of presenting an old "
+          "number as current.")
+
+    movement = service.share_movement("DST-LUD", "DAP", "kharif", "2026-04-15")
+    print(f"\nShare movement, Ludhiana DAP kharif, "
+          f"{movement['from_crop_year']} -> {movement['to_crop_year']} "
+          f"(basis {movement['basis']}):")
+    for row in movement["rows"]:
+        print(f"  {row['seller']:<22} {row['share_from_pct']:>7.4f}% -> "
+              f"{row['share_to_pct']:>7.4f}%  ({row['change_pp']:+.4f} pp)")
+    mover = movement["biggest_mover"]
+    print(f"  biggest mover: {mover['seller']} ({mover['change_pp']:+.4f} "
+          f"pp), carried on {len(mover['observation_ids_from'])} + "
+          f"{len(mover['observation_ids_to'])} observations of "
+          "provenance; verification problems: "
+          f"{service.verify_share_movement(movement['movement_id'])}")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 

@@ -15,6 +15,9 @@ for an operator at a terminal.
     python -m fertilizer_intelligence.cli policy-register
     python -m fertilizer_intelligence.cli policy-events --actual
     python -m fertilizer_intelligence.cli policy-impact --registry-id POLREG-...
+    python -m fertilizer_intelligence.cli observations-build
+    python -m fertilizer_intelligence.cli share --district DST-LUD --product DAP --crop-year 2025-26 --season kharif
+    python -m fertilizer_intelligence.cli share-movement --district DST-LUD --product DAP --season kharif
 
 Everything prints as JSON. The CLI talks to the service layer
 directly, so what it shows is exactly what the API serves.
@@ -188,6 +191,52 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-policy-impact", help="verify a stored impact note")
     p.add_argument("--registry-id", required=True)
 
+    p = sub.add_parser("observations-build", help="promote the tracked competitor points to observation artefacts")
+
+    p = sub.add_parser("observations", help="list competitor observation artefacts")
+    p.add_argument("--competitor", default=None)
+    p.add_argument("--region", default=None)
+    p.add_argument("--product", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("observation", help="one competitor observation by id")
+    p.add_argument("--observation-id", required=True)
+
+    p = sub.add_parser("verify-observation", help="verify a stored competitor observation")
+    p.add_argument("--observation-id", required=True)
+
+    p = sub.add_parser("share", help="compute-or-return one district-season market share")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-share", help="verify the stored head share")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("share-stale", help="the stale-exclusion read for one share")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("share-movement", help="compute-or-return the share movement between the crop years")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-share-movement", help="verify the stored share movement")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--season", required=True)
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -341,6 +390,80 @@ def main(argv=None) -> int:
             problems = service.verify_policy_impact(args.registry_id)
             result = {
                 "note_id": note["note_id"],
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "observations-build":
+            result = service.build_competitor_observations()
+        elif args.command == "observations":
+            result = service.list_competitor_observations(
+                args.competitor, args.region, args.product, args.season
+            )
+        elif args.command == "observation":
+            result = service.get_competitor_observation(args.observation_id)
+            if result is None:
+                print(
+                    f"no such competitor observation: {args.observation_id}",
+                    file=sys.stderr,
+                )
+                return 2
+        elif args.command == "verify-observation":
+            observation = service.get_competitor_observation(args.observation_id)
+            if observation is None:
+                print(
+                    f"no such competitor observation: {args.observation_id}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_competitor_observation(args.observation_id)
+            result = {
+                "observation_id": args.observation_id,
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "share":
+            result = service.market_share(
+                args.district, args.product, args.crop_year, args.season,
+                args.as_of,
+            )
+        elif args.command == "verify-share":
+            share = service.get_share(
+                args.district, args.product, args.crop_year, args.season,
+                args.as_of,
+            )
+            if share is None:
+                print(
+                    f"no market share computed for {args.district} "
+                    f"{args.product} {args.crop_year} {args.season}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_share(share["share_id"])
+            result = {
+                "share_id": share["share_id"],
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "share-stale":
+            result = service.share_stale_exclusions(
+                args.district, args.product, args.crop_year, args.season,
+                args.as_of,
+            )
+        elif args.command == "share-movement":
+            result = service.share_movement(
+                args.district, args.product, args.season, as_of
+            )
+        elif args.command == "verify-share-movement":
+            movement = service.get_share_movement(
+                args.district, args.product, args.season
+            )
+            if movement is None:
+                print(
+                    f"no share movement computed for {args.district} "
+                    f"{args.product} {args.season}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_share_movement(movement["movement_id"])
+            result = {
+                "movement_id": movement["movement_id"],
                 "ok": not problems, "problems": problems,
             }
         else:  # pragma: no cover - argparse enforces the choices

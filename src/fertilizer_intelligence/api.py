@@ -80,6 +80,21 @@ class PolicyRegisterFactsRequest(BaseModel):
     as_of: str | None = None
 
 
+class ShareRequest(BaseModel):
+    district_id: str
+    product: str
+    crop_year: str
+    season: str
+    as_of: str | None = None
+
+
+class ShareMovementRequest(BaseModel):
+    district_id: str
+    product: str
+    season: str
+    as_of: str | None = None
+
+
 class PolicyEventRequest(BaseModel):
     event_id: str
     event_class: str
@@ -529,6 +544,134 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         problems = service.verify_policy_impact(registry_id)
         return {
             "note_id": note["note_id"],
+            "ok": not problems, "problems": problems,
+        }
+
+    # -- competitor & share intelligence (R6) -------------------
+
+    @app.post("/competitor-observations/build")
+    def build_competitor_observations() -> dict:
+        return service.build_competitor_observations()
+
+    @app.get("/competitor-observations")
+    def list_competitor_observations(
+        competitor: str | None = None, region: str | None = None,
+        product: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_competitor_observations(
+            competitor, region, product, season
+        )
+
+    @app.get("/competitor-observations/{observation_id}")
+    def get_competitor_observation(observation_id: str) -> dict:
+        observation = service.get_competitor_observation(observation_id)
+        if observation is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such competitor observation: {observation_id}",
+            )
+        return observation
+
+    @app.get("/competitor-observations/{observation_id}/verify")
+    def verify_competitor_observation(observation_id: str) -> dict:
+        if service.get_competitor_observation(observation_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such competitor observation: {observation_id}",
+            )
+        problems = service.verify_competitor_observation(observation_id)
+        return {
+            "observation_id": observation_id,
+            "ok": not problems, "problems": problems,
+        }
+
+    @app.post("/shares")
+    def compute_share(body: ShareRequest) -> dict:
+        try:
+            return service.market_share(
+                body.district_id, body.product, body.crop_year, body.season,
+                body.as_of,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/shares/{district_id}/{product}/{crop_year}/{season}")
+    def get_share(
+        district_id: str, product: str, crop_year: str, season: str,
+        as_of: str | None = None,
+    ) -> dict:
+        share = service.get_share(district_id, product, crop_year, season, as_of)
+        if share is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no market share computed for {district_id} {product} "
+                       f"{crop_year} {season}",
+            )
+        return share
+
+    @app.get("/shares/{district_id}/{product}/{crop_year}/{season}/verify")
+    def verify_share(
+        district_id: str, product: str, crop_year: str, season: str,
+        as_of: str | None = None,
+    ) -> dict:
+        share = service.get_share(district_id, product, crop_year, season, as_of)
+        if share is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no market share computed for {district_id} {product} "
+                       f"{crop_year} {season}",
+            )
+        problems = service.verify_share(share["share_id"])
+        return {
+            "share_id": share["share_id"],
+            "ok": not problems, "problems": problems,
+        }
+
+    @app.get("/shares/{district_id}/{product}/{crop_year}/{season}/stale")
+    def get_share_stale(
+        district_id: str, product: str, crop_year: str, season: str,
+        as_of: str | None = None,
+    ) -> dict:
+        try:
+            return service.share_stale_exclusions(
+                district_id, product, crop_year, season, as_of
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/share-movements")
+    def compute_share_movement(body: ShareMovementRequest) -> dict:
+        try:
+            return service.share_movement(
+                body.district_id, body.product, body.season,
+                body.as_of or date.today().isoformat(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/share-movements/{district_id}/{product}/{season}")
+    def get_share_movement(district_id: str, product: str, season: str) -> dict:
+        movement = service.get_share_movement(district_id, product, season)
+        if movement is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no share movement computed for {district_id} "
+                       f"{product} {season}",
+            )
+        return movement
+
+    @app.get("/share-movements/{district_id}/{product}/{season}/verify")
+    def verify_share_movement(district_id: str, product: str, season: str) -> dict:
+        movement = service.get_share_movement(district_id, product, season)
+        if movement is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no share movement computed for {district_id} "
+                       f"{product} {season}",
+            )
+        problems = service.verify_share_movement(movement["movement_id"])
+        return {
+            "movement_id": movement["movement_id"],
             "ok": not problems, "problems": problems,
         }
 
