@@ -533,7 +533,9 @@ def parse_question_model(store, port, question: str) -> tuple[list[SpecPanel], d
     AND rendered as a gap panel naming the refusal. A reply
     that is not a JSON array at all refuses the question —
     fail-closed, no fallback to guessing."""
-    reply = port.complete(_PROPOSAL_PROMPT.format(question=question))
+    # .replace, not .format: the prompt states literal JSON
+    # braces for the proposal shape.
+    reply = port.complete(_PROPOSAL_PROMPT.replace("{question}", question))
     text = reply.text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?|\n?```$", "", text).strip()
