@@ -392,6 +392,102 @@ class MarketStore:
             row["figures"] = json.loads(row["figures"])
         return rows
 
+    # -- price watch artefacts (R3, insert-only) -----------------------
+    # Movements and alerts are computed artefacts; alert state is a
+    # fold of alert_acts and is never stored, so there is no update
+    # path for it anywhere.
+
+    def insert_movement(self, movement: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO price_movements (movement_id, series_kind, item, month, "
+            f"price, prev_price, mom_pct, baseline_mean, baseline_pct, "
+            f"baseline_months, fact_ids, rules_version, fact_fingerprint, as_of) "
+            f"VALUES ({', '.join([self._ph] * 14)})",
+            (
+                movement["movement_id"], movement["series_kind"], movement["item"],
+                movement["month"], movement["price"], movement["prev_price"],
+                movement["mom_pct"], movement["baseline_mean"], movement["baseline_pct"],
+                json.dumps(movement["baseline_months"]), json.dumps(movement["fact_ids"]),
+                movement["rules_version"], movement["fact_fingerprint"], movement["as_of"],
+            ),
+        )
+        self._conn.commit()
+
+    def _movement_row(self, row: dict) -> dict:
+        row["baseline_months"] = json.loads(row["baseline_months"])
+        row["fact_ids"] = json.loads(row["fact_ids"])
+        return row
+
+    def get_movement(self, movement_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM price_movements WHERE movement_id = {self._ph}",
+            (movement_id,),
+        )
+        return self._movement_row(rows[0]) if rows else None
+
+    def list_movements(self, series_kind=None, item=None) -> list[dict]:
+        sql, params = "SELECT * FROM price_movements WHERE 1=1", []
+        for column, value in (("series_kind", series_kind), ("item", item)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY series_kind, item, month", tuple(params))
+        return [self._movement_row(row) for row in rows]
+
+    def insert_alert(self, alert: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO price_alerts (alert_id, series_kind, item, rule_id, band, "
+            f"period_month, movement_ids, figures, rules_version, as_of) "
+            f"VALUES ({', '.join([self._ph] * 10)})",
+            (
+                alert["alert_id"], alert["series_kind"], alert["item"],
+                alert["rule_id"], alert["band"], alert["period_month"],
+                json.dumps(alert["movement_ids"]), json.dumps(alert["figures"]),
+                alert["rules_version"], alert["as_of"],
+            ),
+        )
+        self._conn.commit()
+
+    def _alert_row(self, row: dict) -> dict:
+        row["movement_ids"] = json.loads(row["movement_ids"])
+        row["figures"] = json.loads(row["figures"])
+        return row
+
+    def get_alert(self, alert_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM price_alerts WHERE alert_id = {self._ph}",
+            (alert_id,),
+        )
+        return self._alert_row(rows[0]) if rows else None
+
+    def list_alerts(self, series_kind=None, item=None, rule_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM price_alerts WHERE 1=1", []
+        for column, value in (("series_kind", series_kind), ("item", item), ("rule_id", rule_id)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY series_kind, item, period_month, rule_id", tuple(params)
+        )
+        return [self._alert_row(row) for row in rows]
+
+    def insert_alert_act(self, act: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO alert_acts (act_id, alert_id, act, actor, note, "
+            f"closing_reason, as_of) VALUES ({', '.join([self._ph] * 7)})",
+            (
+                act["act_id"], act["alert_id"], act["act"], act["actor"],
+                act["note"], act["closing_reason"], act["as_of"],
+            ),
+        )
+        self._conn.commit()
+
+    def list_alert_acts(self, alert_id: str) -> list[dict]:
+        return self._rows(
+            f"SELECT * FROM alert_acts WHERE alert_id = {self._ph} ORDER BY act_id",
+            (alert_id,),
+        )
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
