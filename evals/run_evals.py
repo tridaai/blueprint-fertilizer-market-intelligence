@@ -112,6 +112,42 @@ Round 5 adds the policy-registry counters (all zero-tolerance):
                                    events per series, or markers
                                    inflating the alert counts
 
+Round 6 adds the competitor & share counters (all zero-tolerance):
+  - share_arithmetic_mismatches .. a share whose observed-market
+                                   reading does not sum to its
+                                   own denominator, whose demand
+                                   reading disagrees with the R2
+                                   estimate, or that the verifier
+                                   cannot re-perform — graded on
+                                   two district-product-seasons
+  - provenance_refusals_missing .. a competitor observation
+                                   stored without its source or
+                                   its observation date, or a
+                                   provenance-less build the
+                                   engine accepted
+  - stale_exclusion_mismatches ... at a late read date, the
+                                   excluded set is not exactly
+                                   the aged-out observations, the
+                                   exclusion is not named on the
+                                   artefact, or stale months leak
+                                   into the headline
+  - not_current_mismatches ....... an all-stale cell that does
+                                   not read `not_current`, or a
+                                   product with no observations
+                                   that does not read
+                                   `no_observations`
+  - movement_reperformance_failures
+                                   a movement row that is not
+                                   the difference of the two
+                                   seasons' full-season readings,
+                                   a biggest mover without its
+                                   observation provenance, or a
+                                   movement the verifier cannot
+                                   re-perform
+  - share_tamper_undetected ...... a stored share figure altered
+                                   behind the store's back that
+                                   the verifier did not catch
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -784,7 +820,183 @@ def main() -> int:
     if sum(r["open_alert_count"] for r in board.values()) != open_alerts:
         counters["policy_board_marker_mismatches"] += 1
 
-    print("Round 1+2+3+4+5 evals — fertilizer market intelligence")
+    # --- Round 6: competitor & market-share intelligence -----------
+    counters.update({
+        "share_arithmetic_mismatches": 0,
+        "provenance_refusals_missing": 0,
+        "stale_exclusion_mismatches": 0,
+        "not_current_mismatches": 0,
+        "movement_reperformance_failures": 0,
+        "share_tamper_undetected": 0,
+    })
+
+    from fertilizer_intelligence.share import observation_from_point
+
+    built = service.build_competitor_observations()
+    if built["observations_stored"] != 720 or built["observations_total"] != 720:
+        counters["provenance_refusals_missing"] += 1
+    if service.build_competitor_observations()["observations_stored"] != 0:
+        counters["provenance_refusals_missing"] += 1
+    observations = service.list_competitor_observations()
+    if len(observations) != 720 or any(
+        not o["source"] or not o["as_of"] for o in observations
+    ):
+        counters["provenance_refusals_missing"] += 1
+    # Provenance is constitutive: a point without source or
+    # without date is refused at the build, never stored bare.
+    probe = {
+        "competitor": "AgroNutrient Ltd", "region": "north",
+        "product": "DAP", "month": "2025-09", "volume_tonnes": 100.0,
+        "price": 27000.0, "source": "competitor_field_tracking",
+        "as_of": "2025-09-30",
+    }
+    districts = store.list_districts()
+    for broken in (
+        {**probe, "source": ""},
+        {k: v for k, v in probe.items() if k != "source"},
+        {**probe, "as_of": ""},
+        {k: v for k, v in probe.items() if k != "as_of"},
+    ):
+        try:
+            observation_from_point(broken, districts)
+            counters["provenance_refusals_missing"] += 1  # accepted!
+        except ValueError:
+            pass
+    for observation in observations[:25]:
+        if service.verify_competitor_observation(observation["observation_id"]):
+            counters["provenance_refusals_missing"] += 1
+
+    # Share arithmetic on two district-product-seasons: the
+    # observed reading sums to its own denominator, the demand
+    # reading's Kaveri line matches the R2 total independently,
+    # and the verifier re-performs both.
+    for district, product, crop_year, season in (
+        ("DST-LUD", "DAP", "2025-26", "kharif"),
+        ("DST-GUN", "UREA", "2025-26", "rabi"),
+    ):
+        share = service.market_share(district, product, crop_year, season)
+        if share["status"] != "current" or service.verify_share(share["share_id"]):
+            counters["share_arithmetic_mismatches"] += 1
+            continue
+        headline = share["headline"]
+        sellers = [headline["kaveri"]] + headline["competitors"]
+        if abs(sum(s["volume_tonnes"] for s in sellers)
+               - headline["observed_market_tonnes"]) > 0.01:
+            counters["share_arithmetic_mismatches"] += 1
+        if abs(sum(s["share_of_observed_market_pct"] for s in sellers)
+               - 100.0) > 0.01:
+            counters["share_arithmetic_mismatches"] += 1
+        estimate = service.estimate_demand(district, product, crop_year, season, as_of)
+        kaveri = headline["kaveri"]
+        if abs(kaveri["share_of_total_demand_pct"]
+               - round(100.0 * kaveri["volume_tonnes"]
+                       / estimate["total_tonnes"], 4)) > 0.0002:
+            counters["share_arithmetic_mismatches"] += 1
+        if headline["demand_tonnes"] != estimate["total_tonnes"]:
+            counters["share_arithmetic_mismatches"] += 1
+
+    # Staleness: at 2026-03-31 the kharif headline excludes
+    # exactly the nine June–August observations, names the
+    # exclusion, and keeps stale months out of the headline.
+    late = service.market_share("DST-LUD", "DAP", "2025-26", "kharif", "2026-03-31")
+    excluded = late["headline"]["excluded_observations"] if late["headline"] else []
+    expected_excluded = {
+        f"OBS-{slug}-north-DAP-2025-{month}"
+        for slug in ("AGRONUTRIENT-LTD", "BHARATFERT-CORP", "SAGAR-CHEMICALS")
+        for month in ("06", "07", "08")
+    }
+    if {e["observation_id"] for e in excluded} != expected_excluded:
+        counters["stale_exclusion_mismatches"] += 1
+    if late["headline_note"] != "headline excludes 9 stale observations":
+        counters["stale_exclusion_mismatches"] += 1
+    if not late["headline"] or late["headline"]["months"] != [
+        "2025-09", "2025-10", "2025-11"
+    ]:
+        counters["stale_exclusion_mismatches"] += 1
+    stale_read = service.share_stale_exclusions(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2026-03-31")
+    if stale_read["stale_count"] != 9:
+        counters["stale_exclusion_mismatches"] += 1
+    if service.verify_share(late["share_id"]):
+        counters["stale_exclusion_mismatches"] += 1
+
+    # Named states: all-stale reads not_current; a product
+    # with no tracked observations reads no_observations.
+    old = service.market_share("DST-LUD", "DAP", "2024-25", "rabi", "2026-03-31")
+    if old["status"] != "not_current" or old["headline"] is not None:
+        counters["not_current_mismatches"] += 1
+    none_share = service.market_share("DST-LUD", "GLYPHOSATE", "2025-26", "kharif")
+    if none_share["status"] != "no_observations" \
+            or none_share["headline"] is not None:
+        counters["not_current_mismatches"] += 1
+
+    # Movement: every row is the difference of the two
+    # seasons' full-season readings, and the biggest mover
+    # carries its observation provenance in both years.
+    movement = service.share_movement("DST-LUD", "DAP", "kharif", as_of)
+    if service.verify_share_movement(movement["movement_id"]):
+        counters["movement_reperformance_failures"] += 1
+    season_shares = {
+        year: service.market_share("DST-LUD", "DAP", year, "kharif")
+        for year in ("2024-25", "2025-26")
+    }
+
+    def _observed_pct(share):
+        reading = share["full_season"]
+        out = {reading["kaveri"]["seller"]:
+               reading["kaveri"]["share_of_observed_market_pct"]}
+        for competitor in reading["competitors"]:
+            out[competitor["seller"]] = \
+                competitor["share_of_observed_market_pct"]
+        return out
+
+    before = _observed_pct(season_shares["2024-25"])
+    after = _observed_pct(season_shares["2025-26"])
+    for row in movement["rows"]:
+        if row["change_pp"] != round(after[row["seller"]] - before[row["seller"]], 4):
+            counters["movement_reperformance_failures"] += 1
+    mover = movement["biggest_mover"]
+    for year, key in (("2024-25", "observation_ids_from"),
+                      ("2025-26", "observation_ids_to")):
+        expected_ids = sorted(
+            p["observation_id"] for p in season_shares[year]["provenance"]
+            if p["competitor"] == mover["seller"]
+        )
+        if mover[key] != expected_ids:
+            counters["movement_reperformance_failures"] += 1
+
+    # Tamper: a share figure altered behind the store's back
+    # must fail verification; restoring it must pass again.
+    import json as _json6
+    import sqlite3 as _sqlite6
+
+    victim = service.market_share("DST-LUD", "DAP", "2025-26", "kharif")
+    raw = _sqlite6.connect(settings.sqlite_path)
+    payload = _json6.loads(
+        raw.execute(
+            "SELECT payload FROM market_shares WHERE share_id = ?",
+            (victim["share_id"],),
+        ).fetchone()[0]
+    )
+    payload["headline"]["kaveri"]["volume_tonnes"] += 100.0
+    raw.execute(
+        "UPDATE market_shares SET payload = ? WHERE share_id = ?",
+        (_json6.dumps(payload), victim["share_id"]),
+    )
+    raw.commit()
+    if not service.verify_share(victim["share_id"]):
+        counters["share_tamper_undetected"] += 1
+    payload["headline"]["kaveri"]["volume_tonnes"] -= 100.0
+    raw.execute(
+        "UPDATE market_shares SET payload = ? WHERE share_id = ?",
+        (_json6.dumps(payload), victim["share_id"]),
+    )
+    raw.commit()
+    raw.close()
+    if service.verify_share(victim["share_id"]):
+        counters["share_tamper_undetected"] += 1
+
+    print("Round 1+2+3+4+5+6 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
