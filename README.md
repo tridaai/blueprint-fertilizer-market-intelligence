@@ -76,6 +76,52 @@ and never presents a stale figure as current.
   district × season coverage, consumption re-derivation, and the
   insert-only guarantee. All zero-tolerance.
 
+## What Round 2 adds
+
+- **The demand-estimation engine** — for any district × product ×
+  season, a `DemandEstimate` artefact computed in code from stored
+  facts only: base demand from cropped area × the stored crop-mix
+  application rates (every crop recorded, including the ones
+  excluded for want of a rate), then the versioned rule pack's
+  factor adjustments in a stated order — **soil nutrient status**,
+  **monsoon deviation**, **price elasticity** against the product's
+  own season-window price series, and **carry-in stock** from
+  trailing production-vs-plan where supply facts exist. Every
+  adjustment is a contribution line carrying its input values and
+  the fact ids they came from, and the total is exactly
+  base + the line deltas.
+- **Partial means partial, and it says why** — a required input
+  that is not in the store (the first crop year has no price
+  history and no full carry-in window) yields a partial estimate
+  naming the missing drivers. Nothing is substituted — no national
+  average, no silent 1.0. A driver that cannot apply at all (MOP
+  has no supply facts) is recorded `not_applicable` with its
+  reason, which is a different statement from "missing".
+- **Re-performable forever** — each estimate carries the
+  fingerprint of the exact fact set behind it and is stored
+  insert-only: recomputing over unchanged facts returns the same
+  artefact, recomputing over changed facts supersedes it by link,
+  and a verifier re-performs any estimate from its own recorded
+  inputs, so a tampered line or total is detectable even after
+  the facts have moved on. The engine's base × soil × monsoon
+  reproduces the stored consumption derivation — two independent
+  paths to the same figure, graded against each other.
+- **The season outlook** — the full 72-cell district × product
+  grid as one artefact whose product rollups and total are sums
+  of the member estimates, computed from them and verifiable
+  against them. There is no second aggregation anywhere.
+- **A narrative that cannot invent a figure** — the agent step
+  drafts the outlook narrative through the model port; a figure
+  verifier checks every number in the draft against the
+  artefacts' figure set before the narrative may be stored, and
+  a wrong figure refuses the draft wholesale.
+- **Surfaces** — migration 0002 (estimates, contributions,
+  outlooks, narratives), estimate/outlook/narrative reads and
+  acts on the API, and a CLI (`scripts/cli.py`) with the same
+  surface. The eval gate grows the round-2 counters:
+  re-performance, total identity, consumption drift, rollup
+  identity, partial naming, narrative figures, tamper detection.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -128,18 +174,25 @@ SeaweedFS S3 gateway together.
   generator + manifest, the insert-only market data store, the
   model port, the API read surface, demo, harness, tests and the
   eval gate.
+- **Built and gated in R2:** the demand-estimation engine (base
+  from area × stored rates, four stated factor rules as recorded
+  contribution lines, partial estimates naming missing drivers,
+  fact-fingerprint supersession, re-performance verification),
+  the season outlook with sum-of-parts rollups, and the
+  figure-verified outlook narrative — migration 0002, API + CLI
+  surfaces, demo walk, tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the demand-estimation
-  engine (R2), price/feedstock alerts (R3), the supply-gap tracker
-  (R4), the policy registry views (R5), competitor/share views
-  (R6), field-signal weighting (R7), the plain-language dashboard
-  assembler (R8), scenario forks (R9), the weekly brief (R10), the
-  Postgres production smoke (R11) and the console (R13).
+- **Not built yet (on the round map):** price/feedstock alerts
+  (R3), the supply-gap tracker (R4), the policy registry views
+  (R5), competitor/share views (R6), field-signal weighting (R7),
+  the plain-language dashboard assembler (R8), scenario forks
+  (R9), the weekly brief (R10), the Postgres production smoke
+  (R11) and the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -155,14 +208,17 @@ src/fertilizer_intelligence/
   logging_config.py  JSON logs with request ids
   models.py          fact models — provenance is mandatory
   generator.py       the seeded dataset generator + manifest
+  demand_rules.py    the versioned demand rule pack (factors, windows)
+  demand.py          the demand engine, verifiers, outlook narrator
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + read wiring
+  service.py         dataset loading + read/engine wiring
   api.py             FastAPI surface
+  cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001 in sqlite + postgres dialects
-scripts/             demo + local harness wrappers
+migrations/          0001-0002 in sqlite + postgres dialects
+scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md
 ```

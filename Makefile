@@ -7,11 +7,12 @@
 #   make evals       eval gate, offline
 #   make serve       the API on http://localhost:8000
 #   make harness     boot the app and exercise the HTTP surface in-process
+#   make cli         the CLI surface (an outlook, as an example)
 #
 # No uv? python3 -m venv .venv && source .venv/bin/activate, then:
 #   make install-pip
 
-.PHONY: install install-pip demo test evals serve harness
+.PHONY: install install-pip demo test evals serve harness cli
 
 install:
 	uv sync --extra dev
@@ -38,3 +39,6 @@ serve:
 
 harness:
 	uv run python scripts/local_harness.py
+
+cli:
+	uv run python scripts/cli.py outlook --crop-year 2025-26 --season kharif

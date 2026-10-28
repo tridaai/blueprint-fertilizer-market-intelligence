@@ -27,14 +27,23 @@
         └──────────────────────────┘
 ```
 
-Later rounds add, behind the same ports: the demand-estimation
-engine (computed views over the store, driver contributions as
-artefacts), the alert recorder, the dashboard assembler
-(AgentSQL-shaped: natural language → governed artefact selection →
-static page), scenario forks, and the weekly brief with its figure
-verifier. The LangGraph workflow (ingest → estimate → assemble →
-brief → publish gate) orchestrates those steps; every state
-transition is a stored artefact.
+Round 2 adds the demand-estimation engine behind the service:
+`demand_rules.py` holds the versioned rule pack (soil factors,
+monsoon bands, price elasticities, carry-in bands, calendar
+windows — imported by the generator too, so each rule is stated
+exactly once), and `demand.py` holds the engine, the
+re-performance verifier, the outlook builder and the narrator.
+Estimates, outlooks and narratives are stored artefacts
+(migration 0002), insert-only like the facts, linked by
+supersession when the fact set moves.
+
+Later rounds add, behind the same ports: the alert recorder, the
+dashboard assembler (AgentSQL-shaped: natural language → governed
+artefact selection → static page), scenario forks, and the
+weekly brief with its figure verifier. The LangGraph workflow
+(ingest → estimate → assemble → brief → publish gate)
+orchestrates those steps; every state transition is a stored
+artefact.
 
 ## The invariants
 
@@ -49,6 +58,19 @@ transition is a stored artefact.
   re-derivation. The R2 demand engine follows the same rule — an
   estimate is a function of stored facts plus a versioned rule set,
   and the eval gate re-performs it.
+- **Estimates are re-performable from themselves.** Each estimate
+  records its inputs (values + fact ids) on its contribution
+  lines, so verification does not depend on the current fact
+  set: an estimate stays provable after it is superseded, and a
+  tampered line is detectable forever. Missing inputs are named
+  on the artefact (`partial` + `missing_drivers`); inapplicable
+  drivers are recorded as such — the two are never conflated.
+- **Rollups are sums, not estimates.** An outlook's product
+  rollups and total are computed from its member estimates and
+  graded against them; no code path aggregates independently.
+- **Narrative figures are checked, not trusted.** The model port
+  drafts words; the figure verifier admits the draft only if
+  every figure in it belongs to the artefacts' figure set.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -57,9 +79,9 @@ transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migration 0001)
+## Data model (migrations 0001–0002)
 
-Fact tables: `districts`, `area_facts`, `monsoon_facts`,
+Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
 `price_points`, `import_arrivals`, `supply_facts`,
 `competitor_points`, `policy_events`, `field_reports`, and
@@ -67,6 +89,16 @@ Fact tables: `districts`, `area_facts`, `monsoon_facts`,
 each fact, which is what makes a duplicate insert an error rather
 than an overwrite. JSON payloads (policy-event product lists, the
 manifest) are stored as JSON text in both dialects.
+
+Artefact tables (0002): `demand_estimates` (one row per computed
+estimate, with status, base/total, missing drivers, rule-pack
+versions, the fact fingerprint and a `supersedes` link),
+`demand_contributions` (the five stated lines per estimate, with
+factor, delta, running value and the recorded inputs as JSON),
+`season_outlooks` (the grid snapshot: member estimate ids, product
+rollups and total as JSON + columns), and `outlook_narratives`
+(the verified narrative text with the figure set it was checked
+against). Artefacts share the facts' insert-only discipline.
 
 ## Deployment
 
