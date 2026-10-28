@@ -148,6 +148,39 @@ Round 6 adds the competitor & share counters (all zero-tolerance):
                                    behind the store's back that
                                    the verifier did not catch
 
+Round 7 adds the field-signal counters (all zero-tolerance):
+  - field_duplicate_syncs_landed . a re-sent submission (a full
+                                   outbox re-send after a partial
+                                   sync, a second planted
+                                   promotion) that landed a second
+                                   artefact
+  - field_uncapped_unverified_influence
+                                   an unreviewed report whose
+                                   applied influence in an
+                                   assessment exceeds the pack's
+                                   unverified cap — graded on a
+                                   fresh surge whose uncapped
+                                   weight is above the cap
+  - field_unattributed_artefacts . a field report artefact or an
+                                   assessment line that does not
+                                   name its reporter and review
+                                   state
+  - field_silent_overwrites ...... a conflicting payload under
+                                   one submission id that replaced
+                                   (or failed to link to) the
+                                   original artefact
+  - field_zero_influence_violations
+                                   a queried or rejected report
+                                   carrying nonzero influence, or a
+                                   rejected report revived by a
+                                   later confirm act
+  - field_influence_reperformance_failures
+                                   an assessment the verifier cannot
+                                   re-perform from its reports,
+                                   acts and estimate, or a tampered
+                                   assessment/report the verifier
+                                   did not catch
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -996,7 +1029,161 @@ def main() -> int:
     if service.verify_share(victim["share_id"]):
         counters["share_tamper_undetected"] += 1
 
-    print("Round 1+2+3+4+5+6 evals — fertilizer market intelligence")
+    # --- Round 7: field signals & mobile intake -------------------
+    counters.update({
+        "field_duplicate_syncs_landed": 0,
+        "field_uncapped_unverified_influence": 0,
+        "field_unattributed_artefacts": 0,
+        "field_silent_overwrites": 0,
+        "field_zero_influence_violations": 0,
+        "field_influence_reperformance_failures": 0,
+    })
+
+    from fertilizer_intelligence.field import FieldReviewError
+
+    # Exactly-once landing: the planted promotion lands the
+    # twelve R1 reports; a second promotion lands nothing.
+    promoted = service.promote_planted_field_reports(as_of)
+    if promoted["landed"] != 12 or promoted["reports_total"] != 12:
+        counters["field_duplicate_syncs_landed"] += 1
+    if service.promote_planted_field_reports(as_of)["landed"] != 0:
+        counters["field_duplicate_syncs_landed"] += 1
+
+    # Attribution: every landed artefact names its reporter,
+    # district, product and observation date, and verifies.
+    for view in service.list_field_reports():
+        if not view["reporter"] or not view["district_id"] \
+                or not view["product"] or not view["observed_on"] \
+                or view["review_state"] != "unreviewed":
+            counters["field_unattributed_artefacts"] += 1
+        if service.verify_field_report(view["report_id"]):
+            counters["field_influence_reperformance_failures"] += 1
+
+    # The outbox walk: a partial sync, a full re-send (the
+    # killed-mid-sync retry), a second full re-send — the two
+    # submissions land exactly once each.
+    outbox = [
+        {"submission_id": "EVAL-PHONE-1", "reporter": "T. Rao (field officer)",
+         "district_id": "DST-LUD", "product": "DAP",
+         "signal_type": "demand_signal", "direction": "up",
+         "observed_on": "2025-10-28",
+         "detail": "Wheat-belt DAP offtake surging."},
+        {"submission_id": "EVAL-PHONE-2", "reporter": "M. Khan (field officer)",
+         "district_id": "DST-LUD", "product": "DAP",
+         "signal_type": "stock_observed", "observed_on": "2025-10-29",
+         "quantity_tonnes": 25.0},
+    ]
+    service.sync_field_reports(outbox[:1], "2025-11-02")
+    retry = service.sync_field_reports(outbox, "2025-11-02")
+    if [r["outcome"] for r in retry["receipt"]] != ["duplicate", "landed"]:
+        counters["field_duplicate_syncs_landed"] += 1
+    if service.sync_field_reports(outbox, "2025-11-02")["landed"] != 0:
+        counters["field_duplicate_syncs_landed"] += 1
+    if len(service.store.list_field_report_artefacts()) != 14:
+        counters["field_duplicate_syncs_landed"] += 1
+
+    # The cap, graded: the fresh unreviewed surge's uncapped
+    # weight (6.0 decayed five days = 5.345394) is above the
+    # pack's 1.5 cap, so its applied influence must be the cap
+    # exactly; the stock report (5.0, four days) is capped too.
+    capped = service.field_signal_assessment(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2025-11-02")
+    surge = next(
+        l for l in capped["lines"] if l["report_id"] == "FSR-EVAL-PHONE-1")
+    if surge["uncapped_pct"] != 5.345394 or surge["uncapped_pct"] <= 1.5:
+        counters["field_uncapped_unverified_influence"] += 1
+    if surge["applied_pct"] != 1.5 or surge["capped"] is not True:
+        counters["field_uncapped_unverified_influence"] += 1
+    for line in capped["lines"]:
+        if line["review_state"] == "unreviewed" \
+                and abs(line["applied_pct"]) > 1.5:
+            counters["field_uncapped_unverified_influence"] += 1
+        if not line["reporter"] or not line["review_state"]:
+            counters["field_unattributed_artefacts"] += 1
+    if service.verify_field_assessment(capped["assessment_id"]):
+        counters["field_influence_reperformance_failures"] += 1
+
+    # Zero influence: query the surge and reject the stock
+    # report; the recomputation carries both at exactly zero,
+    # and the rejected report refuses a reviving confirm.
+    service.review_field_report(
+        "FSR-EVAL-PHONE-1", "query", "Eval Reviewer", "needs_quantity",
+        "2025-11-02")
+    service.review_field_report(
+        "FSR-EVAL-PHONE-2", "reject", "Eval Reviewer", "duplicate",
+        "2025-11-02")
+    zeroed = service.field_signal_assessment(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2025-11-02")
+    for line in zeroed["lines"]:
+        if line["review_state"] in ("queried", "rejected") \
+                and line["applied_pct"] != 0.0:
+            counters["field_zero_influence_violations"] += 1
+    if zeroed["adjustment_pct"] != 0.0:
+        counters["field_zero_influence_violations"] += 1
+    try:
+        service.review_field_report(
+            "FSR-EVAL-PHONE-2", "confirm", "Eval Reviewer",
+            "corroborated", "2025-11-02")
+        counters["field_zero_influence_violations"] += 1  # revived!
+    except FieldReviewError:
+        pass
+    if service.verify_field_assessment(zeroed["assessment_id"]):
+        counters["field_influence_reperformance_failures"] += 1
+
+    # Conflicts: the same submission id with different words
+    # lands alongside, linked both ways, the original's words
+    # unoverwritten.
+    changed = dict(outbox[0], detail="Corrected wording from the phone.")
+    receipt = service.sync_field_reports([changed], "2025-11-03")
+    if receipt["receipt"][0]["outcome"] != "conflict":
+        counters["field_silent_overwrites"] += 1
+    original = service.get_field_report("FSR-EVAL-PHONE-1")
+    conflicting = service.get_field_report(receipt["receipt"][0]["report_id"])
+    if original["detail"] != outbox[0]["detail"] \
+            or conflicting["conflicts_with"] != "FSR-EVAL-PHONE-1" \
+            or original["conflict_report_ids"] != [conflicting["report_id"]]:
+        counters["field_silent_overwrites"] += 1
+
+    # Tamper: an assessment figure altered behind the store's
+    # back, and a report's reporter swapped in its payload —
+    # both verifiers must catch them; restoring must pass.
+    import json as _json7
+    import sqlite3 as _sqlite7
+
+    raw = _sqlite7.connect(settings.sqlite_path)
+    payload = _json7.loads(raw.execute(
+        "SELECT payload FROM field_signal_assessments WHERE assessment_id = ?",
+        (zeroed["assessment_id"],),
+    ).fetchone()[0])
+    payload["adjusted_tonnes"] += 100.0
+    raw.execute(
+        "UPDATE field_signal_assessments SET payload = ? WHERE assessment_id = ?",
+        (_json7.dumps(payload), zeroed["assessment_id"]),
+    )
+    raw.commit()
+    if not service.verify_field_assessment(zeroed["assessment_id"]):
+        counters["field_influence_reperformance_failures"] += 1
+    payload["adjusted_tonnes"] -= 100.0
+    raw.execute(
+        "UPDATE field_signal_assessments SET payload = ? WHERE assessment_id = ?",
+        (_json7.dumps(payload), zeroed["assessment_id"]),
+    )
+    raw.commit()
+    report_payload = _json7.loads(raw.execute(
+        "SELECT payload FROM field_signal_reports WHERE report_id = ?",
+        ("FSR-EVAL-PHONE-1",),
+    ).fetchone()[0])
+    report_payload["reporter"] = "Someone Else"
+    raw.execute(
+        "UPDATE field_signal_reports SET payload = ? WHERE report_id = ?",
+        (_json7.dumps(report_payload), "FSR-EVAL-PHONE-1"),
+    )
+    raw.commit()
+    raw.close()
+    if not service.verify_field_report("FSR-EVAL-PHONE-1"):
+        counters["field_influence_reperformance_failures"] += 1
+
+    print("Round 1+2+3+4+5+6+7 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
