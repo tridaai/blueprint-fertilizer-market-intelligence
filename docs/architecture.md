@@ -86,13 +86,27 @@ service ensures the cell's estimate before an assessment is
 computed, and the assessment read is compute-or-return like
 the other engines' reads.
 
-Later rounds add, behind the same ports: the alert recorder, the
-dashboard assembler (AgentSQL-shaped: natural language → governed
-artefact selection → static page), scenario forks, and the
-weekly brief with its figure verifier. The LangGraph workflow
-(ingest → estimate → assemble → brief → publish gate)
-orchestrates those steps; every state transition is a stored
-artefact.
+Round 8 adds the plain-language dashboard assembler behind
+the same ports (AgentSQL-shaped: natural language → governed
+artefact selection → static page): `dashboard_rules.py`
+states the pack once (the panel vocabulary and the scope
+each kind binds, the stated defaults, the gap wording, the
+role default dashboards as data), and `dashboard.py` parses
+a question into a dashboard spec (migration 0008) — the
+offline profile's deterministic grammar, or a hosted
+profile's proposals validated against the governed schema
+with refusals recorded and rendered as gaps — then
+assembles the spec into a static page rendered only from
+artefacts, verifying every figure against its pinned
+artefact before the assembly is stored. Figure extraction
+is one code path shared by assembly and verification, so
+what is served is exactly what is re-performed.
+
+Later rounds add, behind the same ports: scenario forks and
+the weekly brief with its figure verifier. The LangGraph
+workflow (ingest → estimate → assemble → brief → publish
+gate) orchestrates those steps; every state transition is a
+stored artefact.
 
 ## The invariants
 
@@ -225,6 +239,22 @@ artefact.
   contribution line names its reporter and review state, so
   the adjustment re-performs from the stored reports, acts
   and pack alone.
+- **A dashboard is a verified selection of artefacts.** A
+  dashboard spec names governed panels, each bound to one
+  stated artefact query; an assembly renders only from
+  artefacts, and every figure on it traces to an artefact id
+  and that artefact's as-of. A question part with no artefact
+  family is a gap panel: it states the data it would need
+  and carries no figures. Before an assembly is stored,
+  every figure is re-performed against its pinned artefact —
+  one mismatch refuses the whole dashboard, so no partial or
+  unverified page is ever served. A figure whose source
+  superseded since the question was asked renders from the
+  current head with the supersession noted, and re-assembly
+  states the diff against the previous assembly. Rendering
+  is a pure function of the stored content, so a stored page
+  that was altered after assembly fails verification
+  byte-for-byte.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -233,7 +263,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0007)
+## Data model (migrations 0001–0008)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -319,6 +349,21 @@ base and adjusted totals and the adjustment as columns; the
 per-report contribution lines, the named exclusions and the
 capped list in the payload, with a `supersedes` link). All
 three are insert-only.
+
+Dashboard tables (0008): `dashboard_specs` (one row per
+asked question: the question text, the named asker, the
+optional role and save-name, the as-of and the dashboard
+pack version as columns; the parsed panels with their
+artefact bindings and the full parse provenance — rules
+used, defaults applied, proposals refused and why — in the
+payload), and `dashboard_assemblies` (one row per assembly
+of a spec: the assembly date and a `supersedes` link to the
+previous assembly as columns; the resolved panels with
+their figures, rows and supersession notes, the computed
+diff against the previous assembly, and the rendered HTML
+page in the payload). Both are insert-only; a spec's
+current dashboard is the head of its assemblies' supersedes
+chain.
 
 ## Deployment
 

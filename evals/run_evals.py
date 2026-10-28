@@ -181,6 +181,33 @@ Round 7 adds the field-signal counters (all zero-tolerance):
                                    assessment/report the verifier
                                    did not catch
 
+Round 8 adds the dashboard counters (all zero-tolerance):
+  - dashboard_figures_without_lineage
+                                   a figure on an assembled
+                                   dashboard with no artefact id, no
+                                   source as-of, or an artefact
+                                   outside its panel's binding
+  - dashboard_gap_panel_figures .. an invented figure carried by
+                                   a gap panel — gaps state the
+                                   data they would need, they
+                                   never fill the space with a
+                                   number
+  - dashboard_mismatched_figures_served
+                                   a served dashboard whose
+                                   figures do not re-perform
+                                   against their artefacts, or a
+                                   figure altered behind the
+                                   store's back that the dashboard
+                                   verifier did not catch
+  - dashboard_parse_refusals_unrecorded
+                                   a model proposal refused by
+                                   the governed schema without the
+                                   refusal recorded on the spec
+                                   and rendered as a gap panel, or
+                                   a grammar-parsed question whose
+                                   unanswerable part produced no
+                                   gap panel
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -1183,7 +1210,89 @@ def main() -> int:
     if not service.verify_field_report("FSR-EVAL-PHONE-1"):
         counters["field_influence_reperformance_failures"] += 1
 
-    print("Round 1+2+3+4+5+6+7 evals — fertilizer market intelligence")
+    # --- Round 8: dashboards — lineage, gaps, refusals -------
+    # The mixed question from the demo: two answerable parts
+    # and one part the data cannot answer. Every figure on
+    # the assembled dashboard must carry its lineage, the gap
+    # panel must carry none, the served dashboard must
+    # verify, and a figure altered behind the store's back
+    # must be caught — restoring it must verify clean again.
+    import json as _json8
+    import sqlite3 as _sqlite8
+    from types import SimpleNamespace as _Namespace8
+
+    counters.setdefault("dashboard_figures_without_lineage", 0)
+    counters.setdefault("dashboard_gap_panel_figures", 0)
+    counters.setdefault("dashboard_mismatched_figures_served", 0)
+    counters.setdefault("dashboard_parse_refusals_unrecorded", 0)
+
+    dash_as_of = "2026-04-15"
+    dash_spec = service.ask_question(
+        "How is DAP looking in Ludhiana this kharif, what's our "
+        "share, and what's the monsoon outlook for groundnut in "
+        "Anantapur?",
+        "evals", dash_as_of, name="evals mixed question")
+    dash_assembly = service.assemble_dashboard(dash_spec["spec_id"], dash_as_of)
+    for panel in dash_assembly["panels"]:
+        if panel["kind"] == "gap":
+            counters["dashboard_gap_panel_figures"] += len(panel["figures"])
+        for figure in panel["figures"]:
+            if not figure["artefact_id"] or not figure["source_as_of"] \
+                    or figure["artefact_id"] not in panel["artefact_ids"]:
+                counters["dashboard_figures_without_lineage"] += 1
+    if not service.verify_dashboard(
+            dash_assembly["assembly_id"])["verified"]:
+        counters["dashboard_mismatched_figures_served"] += 1
+
+    raw8 = _sqlite8.connect(settings.sqlite_path)
+    payload8 = _json8.loads(raw8.execute(
+        "SELECT payload FROM dashboard_assemblies WHERE assembly_id = ?",
+        (dash_assembly["assembly_id"],),
+    ).fetchone()[0])
+    payload8["panels"][0]["figures"][0]["value"] += 1000
+    raw8.execute(
+        "UPDATE dashboard_assemblies SET payload = ? WHERE assembly_id = ?",
+        (_json8.dumps(payload8), dash_assembly["assembly_id"]),
+    )
+    raw8.commit()
+    if service.verify_dashboard(dash_assembly["assembly_id"])["verified"]:
+        counters["dashboard_mismatched_figures_served"] += 1
+    payload8["panels"][0]["figures"][0]["value"] -= 1000
+    raw8.execute(
+        "UPDATE dashboard_assemblies SET payload = ? WHERE assembly_id = ?",
+        (_json8.dumps(payload8), dash_assembly["assembly_id"]),
+    )
+    raw8.commit()
+    raw8.close()
+    if not service.verify_dashboard(
+            dash_assembly["assembly_id"])["verified"]:
+        counters["dashboard_mismatched_figures_served"] += 1
+
+    # A hosted proposal outside the governed vocabulary is
+    # refused: the refusal must be recorded on the spec AND
+    # rendered as a gap panel. A grammar question with an
+    # unanswerable part must produce a gap panel too.
+    class _RefusingPort8:
+        profile = "anthropic"
+        model = "evals-stub"
+
+        def complete(self, prompt, system=None):
+            return _Namespace8(text=_json8.dumps(
+                [{"kind": "monsoon_forecast", "scope": {}}]))
+
+    refused_spec = service.ask_question(
+        "Forecast the monsoon for me", "evals", dash_as_of,
+        port=_RefusingPort8())
+    if not refused_spec["parse"]["refusals"]:
+        counters["dashboard_parse_refusals_unrecorded"] += 1
+    if not any(p["kind"] == "gap" for p in refused_spec["panels"]):
+        counters["dashboard_parse_refusals_unrecorded"] += 1
+    grammar_spec = service.ask_question(
+        "What's the monsoon outlook?", "evals", dash_as_of)
+    if not any(p["kind"] == "gap" for p in grammar_spec["panels"]):
+        counters["dashboard_parse_refusals_unrecorded"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]

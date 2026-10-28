@@ -421,6 +421,74 @@ and never presents a stale figure as current.
   unattributed artefacts, silent overwrites, zero-influence
   violations, influence re-performance failures.
 
+## What Round 8 adds
+
+- **Ask in plain language** — a business question ("How is
+  DAP looking in Ludhiana this kharif, what's our share, and
+  what's the monsoon outlook for groundnut in Anantapur?")
+  parses into a **dashboard spec**: a governed selection of
+  panels from the dashboard pack's vocabulary, each panel
+  bound to a stated artefact query (engine + scope + as-of)
+  over the R2–R7 artefact families. The default profile is
+  a deterministic grammar in code, stated as grammar;
+  follow-up clauses inherit scope from the clauses before
+  them, and when no clause names a season or crop year the
+  pack's stated defaults apply and the defaulting is
+  recorded in the parse provenance.
+- **Gaps, never inventions** — a question part that maps to
+  no artefact family becomes a named **gap panel** stating
+  what data would be needed (an untracked district, a crop
+  named where demand is estimated per product, a monsoon
+  outlook the system holds only as a demand driver). A gap
+  panel carries no figures — ever. Hosted profiles are held
+  to the same law: the model port proposes panels as
+  structured output, each proposal is validated against the
+  governed schema, and a proposal that does not fit is
+  refused — the refusal recorded on the spec and rendered
+  as a gap panel, never silently dropped. An unparseable
+  reply refuses the question outright.
+- **The spec is an artefact** — insert-only and
+  content-addressed, carrying the original question, the
+  named asker (attribution is required, never defaulted),
+  the panels with their artefact bindings resolved at ask
+  time, and the parse provenance. Specs save under a name
+  and re-run against fresh data.
+- **Assembly renders only from artefacts** — a static
+  dashboard page (single HTML file, the portfolio console
+  conventions) whose every figure carries its lineage:
+  artefact id, source as-of, and badges — the R6 staleness
+  discipline (stale share figures are badged stale, never
+  presented as current) and the R7 review states on
+  field-signal figures. A figure whose source artefact
+  superseded between spec and assembly renders from the
+  **current head**, with the supersession noted on the
+  panel; re-assembly computes a **diff** against the
+  previous assembly — changed figures and superseded
+  bindings, stated on the artefact and on the page.
+- **Verification before serving** — before an assembly is
+  stored, every figure is re-performed against its pinned
+  artefact (the R2 figure-verifier discipline at dashboard
+  scale): one mismatch refuses the **whole** dashboard with
+  the panel and figure named — no partial render is stored.
+  A stored assembly re-verifies the same way, plus a
+  byte-exact re-render of its page.
+- **Role defaults are data** — the dashboards a regional
+  head, a national planner and leadership open by default
+  are stated panel lists in the dashboard pack, built
+  through the same spec machinery as an asked question —
+  no per-role code branches. An unknown role is refused.
+- **Surfaces** — migration 0008 (dashboard specs,
+  assemblies), `POST /dashboards/ask`, spec list/read/
+  verify, assemble, assembly read/verify/HTML, and the
+  per-role default endpoint on the API, with `ask` /
+  `dashboards` / `dashboard-spec` / `assemble` /
+  `dashboard` / `verify-dashboard` / `role-dashboard`
+  commands on the CLI, and the mixed-question walk in the
+  demo. The eval gate grows the round-8 counters: figures
+  without lineage, invented figures on gap panels,
+  dashboards served with a mismatched figure, unrecorded
+  parse refusals.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -533,16 +601,31 @@ SeaweedFS S3 gateway together.
   queried/rejected/expired at zero and named — migration
   0007, API + CLI surfaces, demo walk, tests and eval
   counters.
+- **Built and gated in R8:** the plain-language dashboard
+  assembler — questions parsed into governed dashboard
+  specs under the versioned dashboard pack (deterministic
+  grammar offline; hosted proposals validated against the
+  schema, refusals recorded and rendered as gaps),
+  unanswerable parts carried as gap panels naming the data
+  they would need and carrying no figures, specs as
+  insert-only attributed artefacts, assembly rendered only
+  from artefacts with per-figure lineage (artefact id,
+  as-of, staleness and review-state badges), supersession
+  noted with figures from the current head, re-assembly
+  diffs computed and stated, whole-dashboard verification
+  before serving (one mismatched figure refuses the whole
+  dashboard), and per-role default dashboards stated as
+  pack data — migration 0008, API + CLI surfaces, demo
+  walk, tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the plain-language
-  dashboard assembler (R8), scenario forks (R9), the weekly
-  brief (R10), the Postgres production smoke (R11) and the
-  console (R13).
+- **Not built yet (on the round map):** scenario forks
+  (R9), the weekly brief (R10), the Postgres production
+  smoke (R11) and the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -570,14 +653,16 @@ src/fertilizer_intelligence/
   share.py           observations, market shares, movements, verifiers
   field_rules.py     the versioned field pack (intake, kinds, decay, cap, acts)
   field.py           signal landing, review fold, weighting assessments
+  dashboard_rules.py the versioned dashboard pack (panel vocabulary, defaults, role defaults)
+  dashboard.py       question parsing, dashboard specs, assembly, verification, rendering
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0007 in sqlite + postgres dialects
+migrations/          0001-0008 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md

@@ -407,6 +407,64 @@ def main() -> int:
           f"(verification problems: "
           f"{service.verify_field_assessment(confirmed['assessment_id'])}).")
 
+    print("\n--- Round 8: ask in plain language ---")
+    question = (
+        "How is DAP looking in Ludhiana this kharif, what's our share, "
+        "and what's the monsoon outlook for groundnut in Anantapur?"
+    )
+    spec = service.ask_question(
+        question, "demo desk", "2026-03-31", name="weekly desk question")
+    print(f"\nThe desk asks: \"{question}\"")
+    print(f"  it parses into spec {spec['spec_id']} — "
+          f"{len(spec['panels'])} governed panels:")
+    for panel in spec["panels"]:
+        origin = panel["origin"]["rule"]
+        print(f"    {panel['panel_no']}. [{panel['kind']}] "
+              f"{panel['title']}  (via {origin})")
+    assembly = service.assemble_dashboard(spec["spec_id"], "2026-03-31")
+    figures = sum(len(p["figures"]) for p in assembly["panels"])
+    print(f"  assembled dashboard {assembly['assembly_id']}: "
+          f"{figures} figures, every one naming its artefact and "
+          f"as-of; verification: "
+          f"{service.verify_dashboard(assembly['assembly_id'])}.")
+    gap = next(p for p in assembly["panels"] if p["kind"] == "gap")
+    print(f"  the third part is a gap, not an invention — it states "
+          f"what it would need:\n    {gap['notes'][0][:220]}...")
+
+    print("\nA saved question, re-run against fresh field data:")
+    field_spec = service.ask_question(
+        "What do the field signals say for DAP in Ludhiana this kharif?",
+        "demo desk", "2025-11-01", name="field watch")
+    first = service.assemble_dashboard(field_spec["spec_id"], "2025-11-01")
+    print(f"  first assembly {first['assembly_id']}: field-signal "
+          f"adjustment "
+          f"{first['panels'][0]['figures'][1]['value']:+.4f}%.")
+    service.sync_field_reports([{
+        "submission_id": "PHONE8-0001",
+        "reporter": "T. Rao (field officer)", "district_id": "DST-LUD",
+        "product": "DAP", "signal_type": "demand_signal",
+        "direction": "up", "observed_on": "2025-11-20",
+        "detail": "Queues at two dealers; offtake running ahead.",
+    }], "2025-11-25")
+    second = service.assemble_dashboard(field_spec["spec_id"], "2025-12-01")
+    print(f"  a surge report lands from a field phone; re-assembly "
+          f"{second['assembly_id']} supersedes the first.")
+    for note in second["panels"][0]["notes"]:
+        print(f"    note: {note}")
+    for entry in second["diff"]:
+        if entry["kind"] == "figure_changed":
+            print(f"    diff: {entry['label']} "
+                  f"{entry['before']} -> {entry['after']}")
+
+    leadership = service.role_default_dashboard(
+        "leadership", "demo desk", "2026-03-31")
+    board = service.assemble_dashboard(leadership["spec_id"], "2026-03-31")
+    print(f"\nThe leadership default is a spec like any other "
+          f"({leadership['spec_id']}, "
+          f"{len(leadership['panels'])} panels stated in the pack); "
+          f"its dashboard verifies: "
+          f"{service.verify_dashboard(board['assembly_id'])['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
