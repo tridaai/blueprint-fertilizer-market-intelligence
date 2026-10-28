@@ -117,13 +117,12 @@ def test_migrations_run_once(settings):
 
 
 def test_api_surface(settings):
-    import httpx
+    from fastapi.testclient import TestClient
 
     from fertilizer_intelligence.api import create_app
 
     app = create_app(settings)
-    transport = httpx.ASGITransport(app=app)
-    with httpx.Client(transport=transport, base_url="http://test") as client:
+    with TestClient(app) as client:
         assert client.get("/health").json() == {"status": "ok"}
         readiness = client.get("/readiness")
         assert readiness.status_code == 200

@@ -53,7 +53,10 @@ class MarketStore:
             return psycopg.connect(self._settings.database_url, row_factory=dict_row)
         path = Path(self._settings.sqlite_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(path)
+        # The API serves requests from a threadpool; the connection
+        # is shared deliberately (single-process app, writes are
+        # insert-only and serialized by the driver).
+        conn = sqlite3.connect(path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 

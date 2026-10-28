@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import tempfile
 
-import httpx
+from fastapi.testclient import TestClient
 
 from fertilizer_intelligence.api import create_app
 from fertilizer_intelligence.config import Settings
@@ -26,8 +26,7 @@ def main() -> int:
         log_level="WARNING",
     )
     app = create_app(settings)
-    transport = httpx.ASGITransport(app=app)
-    with httpx.Client(transport=transport, base_url="http://harness") as client:
+    with TestClient(app) as client:
         for path in (
             "/health",
             "/readiness",

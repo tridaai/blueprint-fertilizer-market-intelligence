@@ -295,7 +295,7 @@ def generate_dataset() -> Dataset:
         ("IMP-MOP-2408", "MOP", "2024-08", "2024-08", 48000, "Canada"),
         ("IMP-DAP-2411", "DAP", "2024-11", "2024-11", 58000, "Saudi Arabia"),
         ("IMP-MOP-2502", "MOP", "2025-02", "2025-02", 51000, "Belarus"),
-        ("IMP-UREA-2505", "UREA", "2025-05", "2025-06", 77000, "Qatar"),
+        ("IMP-UREA-2505", "UREA", "2025-05", "2025-05", 77000, "Qatar"),
         ("IMP-DAP-2507", "DAP", "2025-07", "2025-07", 61000, "Morocco"),
         ("IMP-DAP-2510", "DAP", "2025-10", "2025-12", 55000, "Jordan"),  # planted delay
         ("IMP-MOP-2511", "MOP", "2025-11", "2025-11", 46000, "Canada"),

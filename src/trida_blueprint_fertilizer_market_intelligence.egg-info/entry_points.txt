@@ -1,0 +1,2 @@
+[console_scripts]
+fert-agent-demo = fertilizer_intelligence.demo:main
