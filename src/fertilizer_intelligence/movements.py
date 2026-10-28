@@ -309,6 +309,12 @@ def verify_alert(store, alert: dict) -> list[str]:
 # -- alert state, derived from acts ------------------------------------------
 
 
+class AlertStateError(RuntimeError):
+    """An act was attempted against an alert whose derived state
+    does not allow it (acknowledging an acknowledged or closed
+    alert, closing a closed alert, acting on a missing alert)."""
+
+
 def derive_state(acts: list[dict]) -> str:
     """An alert's state is the fold of its acts: open until an
     acknowledgement, acknowledged until a closure, closed for
