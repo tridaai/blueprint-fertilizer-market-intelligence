@@ -33,6 +33,7 @@ from pathlib import Path
 
 from .config import Settings
 from .demand import NarrativeRefused
+from .field import FieldReviewError
 from .movements import AlertStateError
 from .service import MarketService
 
@@ -236,6 +237,49 @@ def main(argv=None) -> int:
     p.add_argument("--district", required=True)
     p.add_argument("--product", required=True)
     p.add_argument("--season", required=True)
+
+    p = sub.add_parser("field-sync", help="land one mobile outbox batch (JSON file of submissions)")
+    p.add_argument("--file", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("field-promote", help="promote the planted R1 field reports to signal artefacts")
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("field-reports", help="list landed field reports with their review state")
+    p.add_argument("--state", default=None)
+    p.add_argument("--district", default=None)
+    p.add_argument("--product", default=None)
+
+    p = sub.add_parser("field-report", help="one field report by id, with acts and state")
+    p.add_argument("--report-id", required=True)
+
+    p = sub.add_parser("verify-field-report", help="verify a landed field report")
+    p.add_argument("--report-id", required=True)
+
+    p = sub.add_parser("field-review", help="record a reviewer act (confirm / query / reject)")
+    p.add_argument("--report-id", required=True)
+    p.add_argument("--act", required=True)
+    p.add_argument("--actor", required=True)
+    p.add_argument("--reason", required=True)
+    p.add_argument("--note", default=None)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("field-queue", help="the field-report verification queue (one review state)")
+    p.add_argument("--state", default="unreviewed")
+
+    p = sub.add_parser("field-assessment", help="compute-or-return one cell's field-signal assessment")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("verify-field-assessment", help="verify the stored head field assessment")
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--as-of", default=None)
 
     args = parser.parse_args(argv)
     service = _service(args)
@@ -466,12 +510,68 @@ def main(argv=None) -> int:
                 "movement_id": movement["movement_id"],
                 "ok": not problems, "problems": problems,
             }
+        elif args.command == "field-sync":
+            batch = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            submissions = batch["submissions"] if isinstance(batch, dict) else batch
+            result = service.sync_field_reports(submissions, as_of)
+        elif args.command == "field-promote":
+            result = service.promote_planted_field_reports(as_of)
+        elif args.command == "field-reports":
+            result = service.list_field_reports(
+                state=args.state, district_id=args.district, product=args.product
+            )
+        elif args.command == "field-report":
+            report = service.get_field_report(args.report_id)
+            if report is None:
+                print(f"no such field report: {args.report_id}", file=sys.stderr)
+                return 2
+            result = report
+        elif args.command == "verify-field-report":
+            if service.get_field_report(args.report_id) is None:
+                print(f"no such field report: {args.report_id}", file=sys.stderr)
+                return 2
+            problems = service.verify_field_report(args.report_id)
+            result = {
+                "report_id": args.report_id,
+                "ok": not problems, "problems": problems,
+            }
+        elif args.command == "field-review":
+            result = service.review_field_report(
+                args.report_id, args.act, args.actor, args.reason,
+                as_of, note=args.note,
+            )
+        elif args.command == "field-queue":
+            result = service.list_field_reports(state=args.state)
+        elif args.command == "field-assessment":
+            result = service.field_signal_assessment(
+                args.district, args.product, args.crop_year, args.season, as_of
+            )
+        elif args.command == "verify-field-assessment":
+            assessment = service.get_field_assessment(
+                args.district, args.product, args.crop_year, args.season,
+                args.as_of,
+            )
+            if assessment is None:
+                print(
+                    f"no field assessment computed for {args.district} "
+                    f"{args.product} {args.crop_year} {args.season}",
+                    file=sys.stderr,
+                )
+                return 2
+            problems = service.verify_field_assessment(assessment["assessment_id"])
+            result = {
+                "assessment_id": assessment["assessment_id"],
+                "ok": not problems, "problems": problems,
+            }
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except NarrativeRefused as exc:
         print(json.dumps({"refused": exc.problems}, indent=2), file=sys.stderr)
         return 2
     except AlertStateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except FieldReviewError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     except ValueError as exc:

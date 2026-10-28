@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .config import Settings
 from .demand import NarrativeRefused
+from .field import FieldReviewError
 from .logging_config import configure_logging, new_request_id, request_id_var
 from .movements import AlertStateError
 from .service import MarketService
@@ -91,6 +92,31 @@ class ShareRequest(BaseModel):
 class ShareMovementRequest(BaseModel):
     district_id: str
     product: str
+    season: str
+    as_of: str | None = None
+
+
+class FieldSyncRequest(BaseModel):
+    submissions: list[dict]
+    as_of: str | None = None
+
+
+class FieldPromoteRequest(BaseModel):
+    as_of: str | None = None
+
+
+class FieldReviewRequest(BaseModel):
+    act: str
+    actor: str
+    reason: str
+    note: str | None = None
+    as_of: str | None = None
+
+
+class FieldAssessmentRequest(BaseModel):
+    district_id: str
+    product: str
+    crop_year: str
     season: str
     as_of: str | None = None
 
@@ -672,6 +698,117 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         problems = service.verify_share_movement(movement["movement_id"])
         return {
             "movement_id": movement["movement_id"],
+            "ok": not problems, "problems": problems,
+        }
+
+    # -- field signals & mobile intake (R7) -------------------
+
+    @app.post("/field-signals/sync")
+    def sync_field_signals(body: FieldSyncRequest) -> dict:
+        try:
+            return service.sync_field_reports(
+                body.submissions, body.as_of or date.today().isoformat()
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/field-signals/promote-planted")
+    def promote_planted_field_signals(body: FieldPromoteRequest) -> dict:
+        return service.promote_planted_field_reports(
+            body.as_of or date.today().isoformat()
+        )
+
+    @app.get("/field-signals")
+    def list_field_signals(
+        state: str | None = None, district_id: str | None = None,
+        product: str | None = None,
+    ) -> list[dict]:
+        return service.list_field_reports(state, district_id, product)
+
+    @app.get("/field-review-queue")
+    def field_review_queue(state: str = "unreviewed") -> list[dict]:
+        return service.list_field_reports(state=state)
+
+    @app.get("/field-signals/{report_id}")
+    def get_field_signal(report_id: str) -> dict:
+        report = service.get_field_report(report_id)
+        if report is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such field report: {report_id}"
+            )
+        return report
+
+    @app.get("/field-signals/{report_id}/verify")
+    def verify_field_signal(report_id: str) -> dict:
+        if service.get_field_report(report_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such field report: {report_id}"
+            )
+        problems = service.verify_field_report(report_id)
+        return {
+            "report_id": report_id,
+            "ok": not problems, "problems": problems,
+        }
+
+    @app.post("/field-signals/{report_id}/review")
+    def review_field_signal(report_id: str, body: FieldReviewRequest) -> dict:
+        if service.get_field_report(report_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such field report: {report_id}"
+            )
+        try:
+            return service.review_field_report(
+                report_id, body.act, body.actor, body.reason,
+                body.as_of or date.today().isoformat(), note=body.note,
+            )
+        except FieldReviewError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/field-assessments")
+    def compute_field_assessment(body: FieldAssessmentRequest) -> dict:
+        try:
+            return service.field_signal_assessment(
+                body.district_id, body.product, body.crop_year, body.season,
+                body.as_of or date.today().isoformat(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/field-assessments/{district_id}/{product}/{crop_year}/{season}")
+    def get_field_assessment(
+        district_id: str, product: str, crop_year: str, season: str,
+        as_of: str | None = None,
+    ) -> dict:
+        assessment = service.get_field_assessment(
+            district_id, product, crop_year, season, as_of
+        )
+        if assessment is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no field assessment computed for {district_id} "
+                       f"{product} {crop_year} {season}",
+            )
+        return assessment
+
+    @app.get("/field-assessments/{district_id}/{product}/{crop_year}/{season}/verify")
+    def verify_field_assessment(
+        district_id: str, product: str, crop_year: str, season: str,
+        as_of: str | None = None,
+    ) -> dict:
+        assessment = service.get_field_assessment(
+            district_id, product, crop_year, season, as_of
+        )
+        if assessment is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no field assessment computed for {district_id} "
+                       f"{product} {crop_year} {season}",
+            )
+        problems = service.verify_field_assessment(assessment["assessment_id"])
+        return {
+            "assessment_id": assessment["assessment_id"],
             "ok": not problems, "problems": problems,
         }
 

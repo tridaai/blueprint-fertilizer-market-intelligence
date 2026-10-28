@@ -349,6 +349,64 @@ def main() -> int:
           "provenance; verification problems: "
           f"{service.verify_share_movement(movement['movement_id'])}")
 
+    print("\n--- Round 7: field signals & mobile intake ---")
+    promoted = service.promote_planted_field_reports("2026-04-15")
+    print(f"\nThe twelve planted field reports promote through the "
+          f"intake's landing machinery: {promoted['landed']} landed, "
+          f"{promoted['reports_total']} signal artefacts, all "
+          f"unreviewed in the verification queue "
+          f"({len(service.list_field_reports(state='unreviewed'))} waiting).")
+
+    print("\nAn outbox from a field phone, queued offline — a DAP "
+          "demand surge observed at Ludhiana on 2025-10-28:")
+    outbox = [{
+        "submission_id": "PHONE7-0001", "reporter": "T. Rao (field officer)",
+        "district_id": "DST-LUD", "product": "DAP",
+        "signal_type": "demand_signal", "direction": "up",
+        "observed_on": "2025-10-28",
+        "detail": "Wheat-belt DAP offtake surging ahead of rabi sowing.",
+    }]
+    first = service.sync_field_reports(outbox[:1], "2025-11-02")
+    print(f"  first sync lands it: {first['receipt'][0]['outcome']} "
+          f"as {first['receipt'][0]['report_id']}")
+    retry = service.sync_field_reports(outbox, "2025-11-02")
+    print(f"  the connection drops mid-sync and the phone re-sends "
+          f"the whole outbox: {retry['receipt'][0]['outcome']} — "
+          "exactly once, no duplicate artefact.")
+    conflict = service.sync_field_reports(
+        [dict(outbox[0], detail="Corrected wording from the phone.")],
+        "2025-11-03",
+    )
+    print(f"  the same submission id with different words is a "
+          f"{conflict['receipt'][0]['outcome']}: both artefacts are "
+          "kept and linked, never silently overwritten.")
+
+    capped = service.field_signal_assessment(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2025-11-02")
+    line = next(
+        l for l in capped["lines"] if l["report_id"] == "FSR-PHONE7-0001")
+    print(f"\nThe weighting assessment for Ludhiana DAP, kharif "
+          f"2025-26: the unreviewed surge would move the estimate "
+          f"by {line['uncapped_pct']:+.4f}% (its kind's stated "
+          f"effect, freshness-decayed), but Law 5's cap binds it "
+          f"to {line['applied_pct']:+.4f}% — base "
+          f"{capped['base_tonnes']:.3f} t -> adjusted "
+          f"{capped['adjusted_tonnes']:.3f} t, the report named "
+          f"as {line['reporter']} ({line['review_state']}).")
+    service.review_field_report(
+        "FSR-PHONE7-0001", "confirm", "A. Reviewer (regional desk)",
+        "corroborated", "2025-11-02",
+    )
+    confirmed = service.field_signal_assessment(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2025-11-02")
+    line = next(
+        l for l in confirmed["lines"] if l["report_id"] == "FSR-PHONE7-0001")
+    print(f"  a named reviewer confirms it, and the recomputation "
+          f"carries its full decayed weight: {line['applied_pct']:+.4f}% "
+          f"-> adjusted {confirmed['adjusted_tonnes']:.3f} t "
+          f"(verification problems: "
+          f"{service.verify_field_assessment(confirmed['assessment_id'])}).")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
