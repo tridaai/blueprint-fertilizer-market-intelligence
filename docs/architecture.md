@@ -58,6 +58,18 @@ outlooks and position chains a note can name before the query
 runs, and lays the registry's current, real, open-window
 events onto the watch board as typed markers.
 
+Round 6 adds competitor & share intelligence behind the same
+ports: `share_rules.py` states the pack once (the freshness
+window per source class, the season attribution, the
+structure construction, the reading bases and statuses), and
+`share.py` promotes the tracked competitor points to
+observation artefacts and computes market shares and share
+movements from the stored observations plus the R2/R4
+volumes (migration 0006), each with its own re-performance
+verifier. The service ensures the observation pass and the
+season outlook before a share is computed, and the stale
+read is compute-or-return like the share read itself.
+
 Later rounds add, behind the same ports: the alert recorder, the
 dashboard assembler (AgentSQL-shaped: natural language → governed
 artefact selection → static page), scenario forks, and the
@@ -152,6 +164,27 @@ artefact.
   a registry reference laid on a series row; it has its own
   count field and no path into the alert counts, the band,
   or any alert state — the eval gate grades the separation.
+- **Share is structure, not tonnage.** Tracked competitor
+  volumes are whole-region figures; district consumption is
+  district-level. The share engine never allocates raw region
+  tonnage into a district: it takes each competitor's
+  structure share of the region's observed market (tracked
+  volumes plus Kaveri's home-market anchor, the region's R2
+  demand total spread over the window) and distributes the
+  district's recorded market by it. Kaveri's line is the
+  residual, and the artefact states that any untracked
+  seller sits inside it. The two denominator readings —
+  of the observed market, of total demand — are computed
+  and labelled separately, never blended.
+- **Freshness decides what is current.** An observation's
+  age at the read date is judged against the pack's window
+  for its source class; a class with no stated window is
+  never fresh. Stale months are badged on the artefact,
+  excluded from the headline, and the exclusion is named
+  with its count. When every month is stale the share reads
+  `not_current` and carries no headline — the full-season
+  figures remain inspectable under their own basis label,
+  but nothing presents a stale number as the current share.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -160,7 +193,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0005)
+## Data model (migrations 0001–0006)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -214,6 +247,20 @@ member artefact ids and cells in the payload, a `supersedes`
 link). Both are insert-only; the current registration of an
 event is the head of its supersedes chain, never a flagged
 row.
+
+Share tables (0006): `competitor_observations` (one row per
+tracked point promoted: competitor, region, product, month
+and its attributed season as columns; district coverage,
+volume, price and the provenance pair in the payload),
+`market_shares` (one row per district × product × season ×
+read date: status, the read date and the share-pack version
+as columns; the month detail, both readings, the allocation
+statement and the provenance panel in the payload, with a
+`supersedes` link), and `share_movements` (one row per
+district × product × season: the two crop years and the
+read date as columns; the per-seller rows, the biggest
+mover with its observation provenance, and the two share
+ids in the payload). All three are insert-only.
 
 ## Deployment
 

@@ -299,6 +299,70 @@ and never presents a stale figure as current.
   mismatches, hypothetical leaks, supersession failures,
   board marker mismatches.
 
+## What Round 6 adds
+
+- **Competitor observations as first-class artefacts** — the
+  720 tracked competitor points (three fictional tracked
+  sellers × five regions × urea and DAP × 24 months) are
+  promoted by an idempotent pass into stored
+  `CompetitorObservation` artefacts: competitor, region with
+  its district list, product, month, the season the month
+  belongs to under the same unique-attribution rule the packs
+  share (a month that opens a season belongs to it — November
+  is rabi's), volume and price, and provenance on the face of
+  the artefact. Provenance is constitutive: a point without
+  its source label or its observation date is refused at the
+  build and can never be stored bare.
+- **Share computed by structure, never by raw tonnage** —
+  tracked competitor volumes are whole-region figures while
+  recorded consumption is district-level, and the two scales
+  differ by an order of magnitude, so a share is built the
+  way the market is actually observed: per month, the
+  region's observed market is the tracked competitors'
+  volumes plus Kaveri's home-market anchor (the region's R2
+  demand total, spread over the season window by the supply
+  pack's spread rule); each competitor's structure share of
+  that observed market distributes the district's recorded
+  market for the month, and Kaveri's line is the residual —
+  the artefact states this basis on its face, including that
+  any untracked seller sits inside the residual. Every share
+  carries both denominator readings, labelled and never
+  blended: share of the observed market and share of total
+  demand (the district's R2 estimate total).
+- **Staleness is a discipline, not a footnote** — the
+  versioned share pack states the freshness window per
+  source class (field tracking: 200 days; a source class
+  with no stated window is never fresh). At any read date,
+  months whose observations have aged past the window are
+  badged `stale` on the artefact and excluded from the
+  headline share, and the exclusion is named on the artefact
+  itself — "headline excludes 9 stale observations" on the
+  Ludhiana DAP kharif share read at 2026-03-31 — while the
+  full-season reading rides alongside under its own basis
+  label, `full_season_including_stale`. A cell whose every
+  month is stale reads status `not_current` with no headline
+  at all; a product with no tracked observations reads
+  `no_observations`. A stale-exclusion read serves exactly
+  the named excluded set.
+- **Share movements with provenance** — per district ×
+  product × season, a `ShareMovement` compares the two crop
+  years' full-season readings (each struck at its own season
+  close, so the comparison is like-for-like), names the
+  biggest mover by share change, and carries that mover's
+  observation ids in both years on the artefact.
+- **Surfaces** — migration 0006 (competitor observations,
+  market shares, share movements),
+  `POST /competitor-observations/build`, observation
+  list/read/verify, `POST /shares`, share read/verify/stale
+  and share-movement compute/read/verify on the API, and
+  `observations-build` / `observations` / `observation` /
+  `share` / `verify-share` / `share-stale` /
+  `share-movement` / `verify-share-movement` on the CLI.
+  The eval gate grows the round-6 counters: share arithmetic
+  mismatches, provenance refusals missing, stale-exclusion
+  mismatches, not-current mismatches, movement
+  re-performance failures, share tamper undetected.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -385,14 +449,26 @@ SeaweedFS S3 gateway together.
   apart (no note, no board marker, real only by supersession),
   and policy markers on the watch board — migration 0005,
   API + CLI surfaces, demo walk, tests and eval counters.
+- **Built and gated in R6:** competitor & market-share
+  intelligence — the tracked points promoted to
+  provenance-carrying observation artefacts (a point without
+  source or date refused), market shares computed by region
+  structure over the district's recorded market with Kaveri
+  as the named residual and both denominator readings
+  labelled, the freshness discipline (stale months badged,
+  excluded from the headline, the exclusion named; all-stale
+  reads `not_current`; unobserved reads `no_observations`),
+  and share movements between the crop years with the
+  biggest mover's provenance carried — migration 0006,
+  API + CLI surfaces, demo walk, tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** competitor/share
-  views (R6), field-signal weighting (R7), the plain-language
+- **Not built yet (on the round map):** field-signal
+  weighting (R7), the plain-language
   dashboard assembler (R8), scenario forks (R9), the weekly
   brief (R10), the Postgres production smoke (R11) and the
   console (R13).
@@ -419,14 +495,16 @@ src/fertilizer_intelligence/
   supply.py          positions, gaps, projections and their verifiers
   policy_rules.py    the versioned policy pack (classes, linkages, windows)
   policy.py          registry events, impact notes and their verifiers
+  share_rules.py     the versioned share pack (freshness, structure, bases)
+  share.py           observations, market shares, movements, verifiers
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy wiring
+  service.py         dataset loading + engine/watch/supply/policy/share wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0005 in sqlite + postgres dialects
+migrations/          0001-0006 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md
