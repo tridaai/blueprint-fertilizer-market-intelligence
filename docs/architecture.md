@@ -37,6 +37,15 @@ Estimates, outlooks and narratives are stored artefacts
 (migration 0002), insert-only like the facts, linked by
 supersession when the fact set moves.
 
+Round 4 adds the supply tracker behind the same ports:
+`supply_rules.py` states the pack once (the position identity,
+the consumption spread, the initial-stock derivation, programme
+accounting, the gap bands, the projection basis), and
+`supply.py` computes positions, gaps and projections from the
+stored facts — production and arrival facts from 0001, demand
+from the R2 outlooks — storing each as an artefact (migration
+0004) with its own re-performance verifier.
+
 Later rounds add, behind the same ports: the alert recorder, the
 dashboard assembler (AgentSQL-shaped: natural language → governed
 artefact selection → static page), scenario forks, and the
@@ -84,6 +93,28 @@ artefact.
   artefact, with the transitions enforced when an act is
   recorded. Recording an act leaves the alert row itself
   byte-identical; the eval gate grades exactly that.
+- **Positions are chains, not snapshots.** A month's opening is
+  the prior month's closing by recorded link (the first month's
+  opening is a stated derivation over stored consumption), so
+  the chain re-performs end to end and a tampered month is
+  detectable from its own lines and from its neighbours. Every
+  component is a line over named facts; a component with no
+  facts is a computed zero or a `not_applicable` line with its
+  reason — never a silent fill.
+- **A gap names both of its readings.** The season band is the
+  more severe of the programme-cover reading and the level
+  reading, and the artefact records which one bound it, with
+  due / credited / slipped programme tonnage on its face — a
+  delayed vessel moves the band even when the stock level is
+  deep in surplus, and the recovery is a new artefact, not an
+  edit.
+- **Projections carry their assumptions as data.** The
+  assumption set is pinned on the artefact (basis position,
+  plan facts, scheduled and slipped shipments), a slipped
+  shipment is excluded and named — never silently re-dated —
+  and a superseding projection stores the named difference
+  against its predecessor; the verifier re-derives that
+  difference and requires it to match.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -92,7 +123,7 @@ artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0003)
+## Data model (migrations 0001–0004)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -120,6 +151,20 @@ JSON, the rule-pack version and the fact fingerprint),
 triggering movement ids and figures as JSON — and deliberately
 no state column), and `alert_acts` (acknowledgements and
 closures: act kind, named actor, note or closing reason).
+
+Supply tables (0004): `supply_positions` (one row per
+product-month: the five position figures as columns, the rule
+pack version, the fact fingerprint, a `supersedes` link and the
+full artefact as a JSON payload), `supply_position_lines` (the
+five component lines per position: status, tonnes, fact ids and
+recorded inputs as JSON), `supply_gaps` (one row per
+product-season computation: demand, available, gap and
+percentage as columns, band and band basis, the demand outlook
+id, a `supersedes` link and the payload), and
+`supply_projections` (one row per projection: basis month,
+status, opening/closing, a `supersedes` link and the payload,
+which carries the projected months and the pinned assumption
+set). All four are insert-only, like every artefact table here.
 
 ## Deployment
 

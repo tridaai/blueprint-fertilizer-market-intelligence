@@ -169,6 +169,70 @@ and never presents a stale figure as current.
   duplicate alerts, state edits outside acts, alerts without
   movements.
 
+## What Round 4 adds
+
+- **Supply positions, computed in code** — for every product
+  with a supply side (the three produced fertilizers plus
+  import-only MOP), a `SupplyPosition` artefact per month:
+  opening + domestic production + import arrivals −
+  consumption = closing. Every component is a recorded line
+  pinned to its facts; the production line carries plan
+  alongside actual, the import line names the shipments that
+  landed that month, and consumption enters by the pack's
+  stated spread (a season's recorded consumption spread evenly
+  over its six application months, the final month carrying the
+  rounding residual). The first tracked month's opening is the
+  pack's stated derivation — one month of cover at the first
+  tracked crop year's own consumption rate — and every later
+  opening is the prior month's closing, so the whole chain is
+  re-performable end to end. A product with no production and
+  no arrivals (the agrochemicals) has no position, and the
+  engine says so rather than zero-filling one; MOP's production
+  line reads `not_applicable`, with its reason.
+- **The supply-gap view** — per product-season, a `SupplyGap`
+  artefact: the R2 outlook's demand rollup against the supply
+  available to the season, with the season's import programme
+  tested at the gap's as-of month — shipments due, credited
+  once landed (to the season they were scheduled for), slipped
+  tonnage named. The band (comfortable / tight / short) is the
+  more severe of two stated readings in the versioned gap
+  pack — programme cover and the level gap — and the artefact
+  records which reading bound it. The planted DAP delay reads
+  **short** through October and November 2025 (55,000 t slipped,
+  programme cover 52.59%) and resolves to comfortable when the
+  vessel lands in December; import-only MOP binds on the level
+  reading instead.
+- **Forward positions** — a `SupplyProjection` runs an actual
+  position forward to a season's end on a pinned assumption
+  set: production at plan, imports at their expected months,
+  consumption by the same spread. Labelled `projected`
+  throughout; a horizon month with no plan on record is named
+  beyond the plan horizon and left unprojected (status
+  `partial`), never extrapolated. If a scheduled import slips —
+  its expected month passes with no arrival — the projection
+  is recomputed as a new artefact superseding by link, the
+  slipped vessel excluded and the change named in its
+  assumption changes (`slipped_unlanded`); when it later
+  lands, the next projection names that too
+  (`landed_after_slip`).
+- **Verification throughout** — positions verify from their
+  own recorded inputs (identity, production against the supply
+  fact, shipments against the arrival facts, consumption cells
+  against the spread rule, the opening against its stated
+  basis), and the chain head must also match a fresh
+  re-performance; gaps and projections verify by full
+  re-performance, assumption changes included. Tampering with
+  a stored position or one of its lines is detectable.
+- **Surfaces** — migration 0004 (positions + component lines,
+  gaps, projections), `POST /positions`, `/gaps`,
+  `/projections`, position/gap/projection reads with verify
+  endpoints on the API, and `positions` / `position` / `gap` /
+  `projection` with their verify commands on the CLI. The eval
+  gate grows the round-4 counters: position identity
+  violations, planted delay dip mismatches, gap band
+  mismatches, projection supersession failures, undetected
+  position tampering.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -236,17 +300,26 @@ SeaweedFS S3 gateway together.
   acts with state derived (never stored), and the watch views —
   migration 0003, API + CLI surfaces, demo walk, tests and eval
   counters.
+- **Built and gated in R4:** the import & supply-gap tracker —
+  monthly supply positions as re-performable chains (stated
+  initial-stock derivation, production plan-vs-actual, arrivals
+  on actual dates, consumption by the stated seasonal spread),
+  season supply gaps banded by the versioned gap pack over two
+  stated readings (programme cover and level), and projected
+  positions with pinned assumption sets and named slip/landing
+  changes — migration 0004, API + CLI surfaces, demo walk,
+  tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the supply-gap tracker
-  (R4), the policy registry views (R5), competitor/share views
-  (R6), field-signal weighting (R7), the plain-language dashboard
-  assembler (R8), scenario forks (R9), the weekly brief (R10),
-  the Postgres production smoke (R11) and the console (R13).
+- **Not built yet (on the round map):** the policy registry
+  views (R5), competitor/share views (R6), field-signal
+  weighting (R7), the plain-language dashboard assembler (R8),
+  scenario forks (R9), the weekly brief (R10), the Postgres
+  production smoke (R11) and the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -266,14 +339,16 @@ src/fertilizer_intelligence/
   demand.py          the demand engine, verifiers, outlook narrator
   alert_rules.py     the versioned alert rule pack (bands, spike, sustained)
   movements.py       the movement engine, rule firing, alert verification
+  supply_rules.py    the versioned supply pack (identity, spread, gap bands)
+  supply.py          positions, gaps, projections and their verifiers
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + read/engine + watch wiring
+  service.py         dataset loading + engine/watch/supply wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0003 in sqlite + postgres dialects
+migrations/          0001-0004 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md
