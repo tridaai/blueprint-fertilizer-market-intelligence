@@ -489,6 +489,81 @@ and never presents a stale figure as current.
   dashboards served with a mismatched figure, unrecorded
   parse refusals.
 
+## What Round 9 adds
+
+- **Scenario forks** — a scenario is a *pinned fork* of a
+  head estimate or projection, moved by named levers from
+  a **bounded, versioned lever catalogue** (the scenario
+  pack): a monsoon deviation shift (±30 points), a price
+  level shift (±50%) or elasticity override ([−1, 0]) on
+  demand forks; an import arrival slip/advance by whole
+  months (±6, future arrivals only — a fork re-times what
+  has not landed, it never rewrites the basis stock) and a
+  production shortfall (0–50% of plan) on supply forks.
+  Out-of-bounds values, wrong-kind levers and unknown
+  levers are refused with the bound or the catalogue
+  named. A lever aimed at a driver the base carries as
+  missing is recorded on the fork as not applied, with the
+  reason — never silently absorbed.
+- **The same engines, never a parallel calculator** — a
+  fork runs the base artefact's own engine over a
+  substituted fact view (the recorded facts are never
+  written); an elasticity override rides the price line's
+  own recorded inputs, base value alongside, so the fork
+  re-performs under the R2 verifier discipline. The fork
+  carries a **reconciliation**: per driver line (or per
+  horizon month), base delta, fork delta and the
+  lever-attributed difference — knock-on movements are
+  shown and attributed to no lever — summing *exactly* to
+  the fork-minus-base total. Graded: a two-month slip of
+  the October DAP vessel reproduces the planted delay's
+  import path exactly (0 / 0 / 55,000 t).
+- **Plain-language intake** — scenario requests arrive as
+  text through the model port, with R8's discipline: a
+  deterministic grammar offline (defaults recorded, never
+  silent), governed JSON proposals on hosted profiles.
+  Parts that cannot be mapped become **named gaps** on the
+  fork artefact — never dropped, never improvised. A
+  policy event asked as a lever is a named gap by the
+  pack's stated rule: no pack states a numeric
+  transmission from a policy event into the engines, so
+  none is invented.
+- **Planning options** — a comparison artefact holding a
+  base and its forks side by side: totals, the season gap
+  reading struck by the R4 gap machinery over each
+  option's own arrival view, and share-relevant figures
+  where the engines provide them — every figure carrying
+  lineage to its fork or base artefact. Options rank
+  **only** by the pack's stated criteria (carried on each
+  row, deterministically tie-broken), and the comparison
+  re-performs exactly under an independent verifier. An
+  option is **adopted** only by a named planner's act:
+  insert-only, superseding by link, editing no artefact —
+  it records which fork the plan follows.
+- **Hypothetical discipline** — forks live only in the
+  scenario tables. They never enter head estimates, the
+  watch board, policy impact notes or dashboards of
+  record: a dashboard renders a fork only when the
+  question explicitly names the scenario, and then every
+  figure is badged `scenario: <name>` — the dashboard
+  verifier fails an unbadged scenario figure. Graded: the
+  planted record's head figures are byte-identical before
+  and after any fork work.
+- **Surfaces** — migration 0009 (scenario forks, planning
+  options, adoptions), `POST /scenarios` +
+  `/scenarios/ask`, fork list/read/verify, `POST
+  /planning-options`, options read/verify, adopt +
+  current-adoption + adoption verify on the API, with
+  `scenario` / `scenario-ask` / `scenarios` /
+  `verify-scenario` / `planning-options` / `options` /
+  `verify-options` / `adopt` / `adoption` /
+  `verify-adoption` commands on the CLI, a `scenario`
+  panel kind in the dashboard pack, and the two-fork
+  comparison walk in the demo. The eval gate grows the
+  round-9 counters: fork identity/delta mismatch, base
+  mutated by fork, hypothetical leak, unbadged scenario
+  figures served, adoption without a named act.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -617,15 +692,29 @@ SeaweedFS S3 gateway together.
   dashboard), and per-role default dashboards stated as
   pack data — migration 0008, API + CLI surfaces, demo
   walk, tests and eval counters.
+- **Built and gated in R9:** scenario forks & planning
+  options — the versioned scenario pack (bounded lever
+  catalogue, stated ranking criteria, the
+  no-numeric-transmission rule for policy levers), forks
+  computed by the R2/R4 engines over a substituted fact
+  view with exact per-line reconciliation, plain-language
+  scenario intake with named gaps, planning-options
+  comparisons re-performed under an independent verifier,
+  adoption as a named planner's insert-only act, and the
+  hypothetical discipline (forks in their own tables only;
+  dashboards render a fork only when named, badged on
+  every figure) — migration 0009, API + CLI surfaces, a
+  scenario panel kind in the dashboard pack, demo walk,
+  tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** scenario forks
-  (R9), the weekly brief (R10), the Postgres production
-  smoke (R11) and the console (R13).
+- **Not built yet (on the round map):** the weekly brief
+  (R10), the Postgres production smoke (R11) and the
+  console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.

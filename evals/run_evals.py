@@ -208,6 +208,39 @@ Round 8 adds the dashboard counters (all zero-tolerance):
                                    unanswerable part produced no
                                    gap panel
 
+Round 9 adds the scenario counters (all zero-tolerance):
+  - scenario_fork_identity_mismatch
+                                   a fork whose lever deltas do
+                                   not sum to its stated delta, a
+                                   fork or comparison the verifier
+                                   cannot re-perform, a slip fork
+                                   whose import path is not the
+                                   planted delay's path, or a
+                                   tampered fork or comparison
+                                   the verifier did not catch
+  - scenario_base_mutated ........ a head artefact (estimate,
+                                   projection, gap, watch board,
+                                   policy note) that differs
+                                   after fork work from before it
+  - scenario_hypothetical_leak ... a scenario panel, figure or
+                                   badge on a dashboard of
+                                   record, or a head figure whose
+                                   value moved after fork work
+  - scenario_unbadged_figure_served
+                                   a figure on a named-scenario
+                                   dashboard without its scenario
+                                   badge, or a badge stripped
+                                   behind the store's back that
+                                   the dashboard verifier did
+                                   not catch
+  - scenario_adoption_without_act  an adoption recorded
+                                   without a named planner, an
+                                   adoption of a fork outside
+                                   the comparison, a refused
+                                   adoption that was stored
+                                   anyway, or a chain whose head
+                                   is not the latest act
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -1292,7 +1325,205 @@ def main() -> int:
     if not any(p["kind"] == "gap" for p in grammar_spec["panels"]):
         counters["dashboard_parse_refusals_unrecorded"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8 evals — fertilizer market intelligence")
+    # --- Round 9: scenario forks — identity, discipline, adoption --
+    # Forks are pinned views of heads, computed by the same
+    # engines. The gate grades: every fork and comparison
+    # re-performs; the demand identity sums exactly; a slip
+    # fork reproduces the planted delay's import path;
+    # tampering is caught; adoption needs a named act; a
+    # named-scenario dashboard badges every figure; and the
+    # heads are byte-identical after all of it.
+    import json as _json9
+    import sqlite3 as _sqlite9
+
+    counters.setdefault("scenario_fork_identity_mismatch", 0)
+    counters.setdefault("scenario_base_mutated", 0)
+    counters.setdefault("scenario_hypothetical_leak", 0)
+    counters.setdefault("scenario_unbadged_figure_served", 0)
+    counters.setdefault("scenario_adoption_without_act", 0)
+
+    service.estimate_demand("DST-LUD", "DAP", "2025-26", "kharif",
+                            "2026-03-31")
+    proj9 = service.supply_projection("DAP", "2025-26", "rabi",
+                                      "2025-09-30")
+    service.register_policy_events("2026-03-31")
+    regs9 = service.list_policy_events(hypothetical=False)
+    service.demand_outlook("2025-26", "kharif", "2026-03-31")
+    service.demand_outlook("2025-26", "rabi", "2025-09-30")
+    lead9 = service.role_default_dashboard("leadership", "evals",
+                                           "2026-03-31")
+    board9 = service.assemble_dashboard(lead9["spec_id"], "2026-03-31")
+
+    def _heads9() -> str:
+        estimates = store.list_estimates()
+        return _json9.dumps({
+            "estimates": estimates,
+            "contributions": {
+                e["estimate_id"]: store.estimate_contributions(
+                    e["estimate_id"]) for e in estimates},
+            "projections": store.list_projections(),
+            "gap": service.supply_gap("DAP", "2025-26", "kharif",
+                                      "2025-10-31"),
+            "board": service.watch_board(),
+            "note": service.policy_impact(
+                regs9[0]["registry_id"], "2026-03-31"),
+        }, sort_keys=True, default=str)
+
+    heads_before9 = _heads9()
+
+    fork_monsoon = service.ask_scenario(
+        "what if the monsoon comes in 20 points lower for dap "
+        "in ludhiana, kharif 2025-26",
+        "evals", name="Monsoon shortfall")
+    fork_slip = service.create_scenario(
+        "supply_projection",
+        {"product": "DAP", "crop_year": "2025-26", "season": "rabi"},
+        [{"lever": "import_arrival_shift_months", "value": 2,
+          "shipment_id": "IMP-DAP-2510"}],
+        "evals", name="October vessel slips")
+    fork_elasticity = service.create_scenario(
+        "demand_estimate",
+        {"district_id": "DST-LUD", "product": "DAP",
+         "crop_year": "2025-26", "season": "kharif"},
+        [{"lever": "price_elasticity_override", "value": -0.10}],
+        "evals")
+    fork_production = service.create_scenario(
+        "supply_projection",
+        {"product": "DAP", "crop_year": "2025-26", "season": "rabi"},
+        [{"lever": "production_shortfall_pct", "value": 25}],
+        "evals")
+    for fork in (fork_monsoon, fork_slip, fork_elasticity,
+                 fork_production):
+        if not service.verify_scenario(fork["fork_id"])["verified"]:
+            counters["scenario_fork_identity_mismatch"] += 1
+    lever_sum9 = round(sum(r["lever_delta_tonnes"]
+                           for r in fork_monsoon["reconciliation"]), 3)
+    if lever_sum9 != fork_monsoon["delta_tonnes"]:
+        counters["scenario_fork_identity_mismatch"] += 1
+    slip_months9 = {r["month"]: r for r in fork_slip["reconciliation"]}
+    if (slip_months9["2025-10"]["fork_imports_tonnes"],
+            slip_months9["2025-11"]["fork_imports_tonnes"],
+            slip_months9["2025-12"]["fork_imports_tonnes"]) != (0, 0, 55000):
+        counters["scenario_fork_identity_mismatch"] += 1
+
+    options9 = service.build_planning_options(
+        proj9["projection_id"], [fork_slip["fork_id"]], "evals")
+    if not service.verify_planning_options(
+            options9["options_id"])["verified"]:
+        counters["scenario_fork_identity_mismatch"] += 1
+
+    raw9 = _sqlite9.connect(settings.sqlite_path)
+    payload9 = _json9.loads(raw9.execute(
+        "SELECT payload FROM scenario_forks WHERE fork_id = ?",
+        (fork_slip["fork_id"],)).fetchone()[0])
+    payload9["delta_tonnes"] = 999.0
+    raw9.execute(
+        "UPDATE scenario_forks SET payload = ? WHERE fork_id = ?",
+        (_json9.dumps(payload9), fork_slip["fork_id"]))
+    raw9.commit()
+    if service.verify_scenario(fork_slip["fork_id"])["verified"]:
+        counters["scenario_fork_identity_mismatch"] += 1
+    payload9["delta_tonnes"] = 0.0
+    raw9.execute(
+        "UPDATE scenario_forks SET payload = ? WHERE fork_id = ?",
+        (_json9.dumps(payload9), fork_slip["fork_id"]))
+    raw9.commit()
+    if not service.verify_scenario(fork_slip["fork_id"])["verified"]:
+        counters["scenario_fork_identity_mismatch"] += 1
+    payload9 = _json9.loads(raw9.execute(
+        "SELECT payload FROM planning_options WHERE options_id = ?",
+        (options9["options_id"],)).fetchone()[0])
+    payload9["rows"][0]["figures"][1]["value"] += 500
+    raw9.execute(
+        "UPDATE planning_options SET payload = ? WHERE options_id = ?",
+        (_json9.dumps(payload9), options9["options_id"]))
+    raw9.commit()
+    if service.verify_planning_options(options9["options_id"])["verified"]:
+        counters["scenario_fork_identity_mismatch"] += 1
+    raw9.close()
+
+    for bad_actor in ("", "   "):
+        try:
+            service.adopt_option(options9["options_id"],
+                                 fork_slip["fork_id"], bad_actor,
+                                 "2026-04-15")
+            counters["scenario_adoption_without_act"] += 1
+        except ValueError:
+            pass
+    try:
+        service.adopt_option(options9["options_id"],
+                             fork_monsoon["fork_id"], "evals planner",
+                             "2026-04-15")
+        counters["scenario_adoption_without_act"] += 1
+    except ValueError:
+        pass
+    if store.list_planning_adoptions(options9["options_id"]):
+        counters["scenario_adoption_without_act"] += 1
+    adoption9 = service.adopt_option(
+        options9["options_id"], fork_slip["fork_id"], "evals planner",
+        "2026-04-15")
+    if service.current_adoption(
+            options9["options_id"])["adoption_id"] != \
+            adoption9["adoption_id"]:
+        counters["scenario_adoption_without_act"] += 1
+    if not service.verify_adoption(adoption9["adoption_id"])["verified"]:
+        counters["scenario_adoption_without_act"] += 1
+
+    spec9 = service.ask_question(
+        "show me the monsoon shortfall scenario", "evals", "2026-03-31")
+    assembly9 = service.assemble_dashboard(spec9["spec_id"], "2026-03-31")
+    for panel in assembly9["panels"]:
+        for figure in panel["figures"]:
+            if not any(b.startswith("scenario:")
+                       for b in figure["badges"]):
+                counters["scenario_unbadged_figure_served"] += 1
+    if not service.verify_dashboard(assembly9["assembly_id"])["verified"]:
+        counters["scenario_unbadged_figure_served"] += 1
+    raw9 = _sqlite9.connect(settings.sqlite_path)
+    payload9 = _json9.loads(raw9.execute(
+        "SELECT payload FROM dashboard_assemblies "
+        "WHERE assembly_id = ?",
+        (assembly9["assembly_id"],)).fetchone()[0])
+    saved_badges9 = payload9["panels"][0]["figures"][0]["badges"]
+    payload9["panels"][0]["figures"][0]["badges"] = []
+    raw9.execute(
+        "UPDATE dashboard_assemblies SET payload = ? "
+        "WHERE assembly_id = ?",
+        (_json9.dumps(payload9), assembly9["assembly_id"]))
+    raw9.commit()
+    if service.verify_dashboard(assembly9["assembly_id"])["verified"]:
+        counters["scenario_unbadged_figure_served"] += 1
+    payload9["panels"][0]["figures"][0]["badges"] = saved_badges9
+    raw9.execute(
+        "UPDATE dashboard_assemblies SET payload = ? "
+        "WHERE assembly_id = ?",
+        (_json9.dumps(payload9), assembly9["assembly_id"]))
+    raw9.commit()
+    raw9.close()
+    if not service.verify_dashboard(assembly9["assembly_id"])["verified"]:
+        counters["scenario_unbadged_figure_served"] += 1
+
+    if _heads9() != heads_before9:
+        counters["scenario_base_mutated"] += 1
+    board9b = service.assemble_dashboard(lead9["spec_id"], "2026-04-01")
+    for panel in board9b["panels"]:
+        if panel["kind"] == "scenario":
+            counters["scenario_hypothetical_leak"] += 1
+        for figure in panel["figures"]:
+            if any(b.startswith("scenario:")
+                   for b in figure["badges"]):
+                counters["scenario_hypothetical_leak"] += 1
+            if figure["artefact_id"].startswith(
+                    ("SCN-", "OPT-", "ADOPT-")):
+                counters["scenario_hypothetical_leak"] += 1
+    values9a = [[(f["label"], f["value"]) for f in p["figures"]]
+                for p in board9["panels"]]
+    values9b = [[(f["label"], f["value"]) for f in p["figures"]]
+                for p in board9b["panels"]]
+    if values9a != values9b:
+        counters["scenario_hypothetical_leak"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]

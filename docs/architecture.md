@@ -102,10 +102,27 @@ artefact before the assembly is stored. Figure extraction
 is one code path shared by assembly and verification, so
 what is served is exactly what is re-performed.
 
-Later rounds add, behind the same ports: scenario forks and
-the weekly brief with its figure verifier. The LangGraph
-workflow (ingest → estimate → assemble → brief → publish
-gate) orchestrates those steps; every state transition is a
+Round 9 adds scenario forks and planning options behind
+the same ports: `scenario_rules.py` states the pack once
+(the bounded lever catalogue with its bounds and zero
+rules, the policy-no-transmission rule, the stated ranking
+criteria), and `scenario.py` forks a head estimate or
+projection by running that artefact's own engine over a
+read-through fact view — the recorded facts are never
+written — reconciling the fork line by line against the
+base, builds planning-options comparisons whose rows carry
+their criterion values and per-figure lineage, and records
+adoptions as named insert-only acts (migration 0009).
+Forks live only in the scenario tables; the dashboard pack
+gains a `scenario` panel kind that resolves only a fork a
+question explicitly names, with every figure badged as a
+scenario and the dashboard verifier failing an unbadged
+one.
+
+Later rounds add, behind the same ports: the weekly brief
+with its figure verifier. The LangGraph workflow
+(ingest → estimate → assemble → brief → publish gate)
+orchestrates those steps; every state transition is a
 stored artefact.
 
 ## The invariants
@@ -263,7 +280,7 @@ stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0008)
+## Data model (migrations 0001–0009)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -364,6 +381,23 @@ diff against the previous assembly, and the rendered HTML
 page in the payload). Both are insert-only; a spec's
 current dashboard is the head of its assemblies' supersedes
 chain.
+
+Scenario tables (0009): `scenario_forks` (one row per fork:
+kind, base artefact, creator, as-of and the scenario pack
+version as columns; the applied lever records with their
+base values and outcomes, the named gaps, the parse
+provenance, the engine result and the line-by-line
+reconciliation in the payload), `planning_options` (one
+row per comparison: kind, base, creator, as-of and pack
+version as columns; the fork ids, the stated criteria and
+the ranked rows with per-figure lineage and each option's
+gap reading in the payload), and `planning_adoptions` (one
+row per adoption act: the options id, the adopted fork —
+null for the base view — the named planner, the act date
+and a `supersedes` link as columns; the full act in the
+payload). All three are insert-only; no head table
+references them, and the current adoption for a comparison
+is the head of its supersedes chain.
 
 ## Deployment
 

@@ -465,6 +465,102 @@ def main() -> int:
           f"its dashboard verifies: "
           f"{service.verify_dashboard(board['assembly_id'])['verified']}.")
 
+    print("\n--- Round 9: scenario forks & planning options ---")
+    head_before = service.estimate_demand(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2026-03-31")
+    gap_before = service.supply_gap("DAP", "2025-26", "kharif",
+                                     "2025-10-31")
+    print(f"\nHeads of record before any fork work: Ludhiana DAP "
+          f"kharif demand {head_before['total_tonnes']:.3f} t; the "
+          f"kharif gap band is {gap_before['band']} at "
+          f"{gap_before['programme_cover_pct']}% programme cover.")
+
+    monsoon_fork = service.ask_scenario(
+        "what if the monsoon comes in 20 points lower for dap in "
+        "ludhiana, kharif 2025-26",
+        "demo desk", name="Monsoon shortfall")
+    print(f"\nThe desk asks for a scenario in words; it forks the "
+          f"head estimate as {monsoon_fork['fork_id']} "
+          f"\"{monsoon_fork['name']}\" — hypothetical, pinned to "
+          f"{monsoon_fork['base_artefact_id']}:")
+    for row in monsoon_fork["reconciliation"]:
+        if row["lever_delta_tonnes"]:
+            print(f"    {row['driver']}: {row['base_delta_tonnes']:+.3f} "
+                  f"-> {row['fork_delta_tonnes']:+.3f} t "
+                  f"(lever {', '.join(row['attributed_levers'])})")
+    print(f"    demand {monsoon_fork['base_total_tonnes']:.3f} -> "
+          f"{monsoon_fork['fork_total_tonnes']:.3f} t "
+          f"({monsoon_fork['delta_tonnes']:+.3f}); the driver deltas "
+          f"sum to the fork delta exactly, and the fork verifies: "
+          f"{service.verify_scenario(monsoon_fork['fork_id'])['verified']}.")
+
+    slip_fork = service.create_scenario(
+        "supply_projection",
+        {"product": "DAP", "crop_year": "2025-26", "season": "rabi"},
+        [{"lever": "import_arrival_shift_months", "value": 2,
+          "shipment_id": "IMP-DAP-2510"}],
+        "demo desk", name="October vessel slips", as_of="2025-09-30")
+    moved = [r for r in slip_fork["reconciliation"]
+             if r["imports_delta_tonnes"]]
+    print(f"\nA second fork, stated structurally: the October DAP "
+          f"vessel slips two months ({slip_fork['fork_id']}). Its "
+          f"import path moves exactly as the planted delay did:")
+    for row in moved:
+        print(f"    {row['month']}: imports "
+              f"{row['base_imports_tonnes']:.0f} -> "
+              f"{row['fork_imports_tonnes']:.0f} t")
+
+    demand_options = service.build_planning_options(
+        monsoon_fork["base_artefact_id"], [monsoon_fork["fork_id"]],
+        "demo desk", name="kharif demand options")
+    supply_options = service.build_planning_options(
+        slip_fork["base_artefact_id"], [slip_fork["fork_id"]],
+        "demo desk", name="rabi supply options")
+    for options in (demand_options, supply_options):
+        print(f"\n  planning options {options['options_id']} "
+              f"({options['kind']}), ranked only by the pack's "
+              f"stated criteria:")
+        for row in options["rows"]:
+            label = "base view" if row["is_base"] else "scenario"
+            print(f"    rank {row['rank']}: {label} "
+                  f"{row['artefact_id']} — criteria "
+                  f"{ {k: v for k, v in row['criteria'].items() "
+                  f"if k != 'artefact_id'} }")
+    adoption = service.adopt_option(
+        supply_options["options_id"], slip_fork["fork_id"],
+        "M. Krishnan (supply planner)", "2026-04-15",
+        note="plan rabi procurement on the slipped arrival")
+    print(f"\n  the supply planner adopts the slipped-arrival fork "
+          f"by name ({adoption['adoption_id']}); adoption records "
+          f"which fork the plan follows — it edits no artefact. "
+          f"Current adoption: "
+          f"{service.current_adoption(supply_options['options_id'])['adoption_id']}.")
+
+    named = service.ask_question(
+        "show me the monsoon shortfall scenario",
+        "demo desk", "2026-03-31", name="scenario view")
+    named_board = service.assemble_dashboard(named["spec_id"],
+                                             "2026-03-31")
+    scenario_panel = named_board["panels"][0]
+    print(f"\nA dashboard renders the fork only because the question "
+          f"names it — panel [{scenario_panel['kind']}] "
+          f"{scenario_panel['title']}, every figure badged "
+          f"{scenario_panel['figures'][0]['badges']}; the board "
+          f"verifies: "
+          f"{service.verify_dashboard(named_board['assembly_id'])['verified']}.")
+
+    head_after = service.estimate_demand(
+        "DST-LUD", "DAP", "2025-26", "kharif", "2026-03-31")
+    gap_after = service.supply_gap("DAP", "2025-26", "kharif",
+                                   "2025-10-31")
+    print(f"\nHeads of record after all fork work: demand "
+          f"{head_after['total_tonnes']:.3f} t, gap band "
+          f"{gap_after['band']} at "
+          f"{gap_after['programme_cover_pct']}% — byte-identical to "
+          f"before: "
+          f"{head_after == head_before and gap_after == gap_before}. "
+          f"Hypotheticals live only in the fork artefacts.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
