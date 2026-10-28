@@ -55,8 +55,33 @@ Round 3 adds the price-watch counters (all zero-tolerance):
                                    movements are missing or absent
                                    from the store
 
-Later rounds extend this gate: supply gaps (R4), spike/delay
-grading depth (R12).
+Round 4 adds the supply-tracker counters (all zero-tolerance):
+  - position_identity_violations . a stored position whose
+                                   identity fails, whose opening
+                                   is not the prior month's
+                                   closing, or that the verifier
+                                   cannot re-perform line by line
+  - planted_delay_dip_mismatch ... the planted delay's dip and
+                                   recovery months in the DAP
+                                   position chain != the record
+  - gap_band_mismatches .......... a supply gap whose band,
+                                   basis or programme figures miss
+                                   the hand-computed fixtures for
+                                   two products, or that the
+                                   verifier cannot re-perform
+  - projection_supersession_failures
+                                   the slip-driven projection
+                                   chain: a broken supersedes link,
+                                   an unnamed slip, a wrong
+                                   projected closing, or a
+                                   projection the verifier cannot
+                                   re-perform
+  - position_tamper_undetected ... a stored position (or one of
+                                   its lines) altered behind the
+                                   store's back that the verifier
+                                   did not catch
+
+Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
 from __future__ import annotations
@@ -364,7 +389,176 @@ def main() -> int:
         if closed["state"] != "closed" or store.get_alert(spike_alert["alert_id"]) != row_before:
             counters["state_edits_outside_acts"] += 1
 
-    print("Round 1+2+3 evals — fertilizer market intelligence")
+    # --- Round 4: the supply tracker -----------------------------------
+    counters.update({
+        "position_identity_violations": 0,
+        "planted_delay_dip_mismatch": 0,
+        "gap_band_mismatches": 0,
+        "projection_supersession_failures": 0,
+        "position_tamper_undetected": 0,
+    })
+    positionable = ("UREA", "DAP", "NPK_10_26_26", "MOP")
+    chains = {
+        product: service.supply_positions(product, as_of) for product in positionable
+    }
+    for product, chain in chains.items():
+        if [p["month"] for p in chain] != sorted(p["month"] for p in chain) \
+                or len(chain) != 24:
+            counters["position_identity_violations"] += 1
+        for position in chain:
+            identity = (
+                position["opening_tonnes"]
+                + (position["production_actual_tonnes"] or 0.0)
+                + position["imports_tonnes"]
+                - position["consumption_tonnes"]
+            )
+            if abs(identity - position["closing_tonnes"]) > 0.002:
+                counters["position_identity_violations"] += 1
+            if service.verify_position(product, position["month"]):
+                counters["position_identity_violations"] += 1
+        for prior, current in zip(chain, chain[1:]):
+            if current["opening_tonnes"] != prior["closing_tonnes"]:
+                counters["position_identity_violations"] += 1
+
+    # The planted delay in the position chain: nothing lands for
+    # DAP in the expected month or the month after; the delayed
+    # vessel is the only December arrival, named on the line.
+    dap = {p["month"]: p for p in chains["DAP"]}
+    if dap["2025-10"]["imports_tonnes"] != 0.0 or dap["2025-11"]["imports_tonnes"] != 0.0:
+        counters["planted_delay_dip_mismatch"] += 1
+    if dap["2025-12"]["imports_tonnes"] != 55000.0:
+        counters["planted_delay_dip_mismatch"] += 1
+    december_lines = store.position_lines(dap["2025-12"]["position_id"])
+    december_imports = next(
+        l for l in december_lines if l["component"] == "import_arrivals"
+    )
+    named = [s["shipment_id"] for s in december_imports["inputs"]["shipments"]]
+    if named != [delay["shipment_id"]]:
+        counters["planted_delay_dip_mismatch"] += 1
+    landed = {
+        p["month"]: p["imports_tonnes"] for p in chains["DAP"] if p["imports_tonnes"]
+    }
+    if landed != {"2024-07": 64000.0, "2024-11": 58000.0,
+                  "2025-07": 61000.0, "2025-12": 55000.0}:
+        counters["planted_delay_dip_mismatch"] += 1
+
+    # Gap fixtures, hand-computed for two products: DAP's kharif
+    # programme runs short on the slipped tonnage and resolves
+    # when the vessel lands; import-only MOP binds on the level
+    # reading instead.
+    gap_oct = service.supply_gap("DAP", "2025-26", "kharif", "2025-10-31")
+    if not (
+        gap_oct["band"] == "short"
+        and gap_oct["band_basis"] == "import_programme_cover"
+        and gap_oct["due_imports_tonnes"] == 116000.0
+        and gap_oct["credited_imports_tonnes"] == 61000.0
+        and gap_oct["slipped_tonnes"] == 55000.0
+        and gap_oct["programme_cover_pct"] == 52.5862
+        and gap_oct["available_tonnes"] == 7519322.147
+    ):
+        counters["gap_band_mismatches"] += 1
+    gap_dec = service.supply_gap("DAP", "2025-26", "kharif", "2025-12-31")
+    if not (
+        gap_dec["band"] == "comfortable"
+        and gap_dec["programme_cover_pct"] == 100.0
+        and gap_dec["slipped_tonnes"] == 0.0
+        and gap_dec["available_tonnes"] == 7574322.147
+        and gap_dec["supersedes"] == gap_oct["gap_id"]
+    ):
+        counters["gap_band_mismatches"] += 1
+    gap_mop = service.supply_gap("MOP", "2025-26", "kharif", "2025-11-30")
+    if not (
+        gap_mop["band"] == "short"
+        and gap_mop["band_basis"] == "level_gap"
+        and gap_mop["available_tonnes"] == 29534.942
+        and gap_mop["gap_tonnes"] == -49790.311
+        and gap_mop["gap_pct_of_demand"] == -62.7673
+    ):
+        counters["gap_band_mismatches"] += 1
+    for product, year, season in (
+        ("DAP", "2025-26", "kharif"), ("MOP", "2025-26", "kharif")
+    ):
+        if service.verify_gap(product, year, season):
+            counters["gap_band_mismatches"] += 1
+
+    # The projection chain over the delay: scheduled, then slipped
+    # and named, then landed into the basis — each version
+    # superseding by link and re-performable.
+    proj_first = service.supply_projection("DAP", "2025-26", "rabi", "2025-09-30")
+    if not (
+        proj_first["closing_tonnes"] == 8905455.248
+        and proj_first["status"] == "partial"
+        and proj_first["assumption_set"]["beyond_plan_months"] == ["2026-04"]
+        and proj_first["assumption_changes"] == []
+    ):
+        counters["projection_supersession_failures"] += 1
+    proj_slip = service.supply_projection("DAP", "2025-26", "rabi", "2025-11-30")
+    kinds = {(c["kind"], c["shipment_id"]) for c in proj_slip["assumption_changes"]}
+    if not (
+        proj_slip["supersedes"] == proj_first["projection_id"]
+        and proj_slip["closing_tonnes"] == 8832147.348
+        and ("slipped_unlanded", delay["shipment_id"]) in kinds
+    ):
+        counters["projection_supersession_failures"] += 1
+    proj_landed = service.supply_projection("DAP", "2025-26", "rabi", "2025-12-31")
+    kinds = {(c["kind"], c["shipment_id"]) for c in proj_landed["assumption_changes"]}
+    if not (
+        proj_landed["supersedes"] == proj_slip["projection_id"]
+        and proj_landed["closing_tonnes"] == 8850908.948
+        and ("landed_after_slip", delay["shipment_id"]) in kinds
+    ):
+        counters["projection_supersession_failures"] += 1
+    if service.verify_projection("DAP", "2025-26", "rabi"):
+        counters["projection_supersession_failures"] += 1
+
+    # Tamper: a position's closing altered behind the store's
+    # back (payload and column together) must fail verification;
+    # restoring it must verify clean; a component line altered
+    # the same way must fail too.
+    import json as _json
+
+    victim = dap["2025-10"]
+    raw = sqlite3.connect(settings.sqlite_path)
+    payload = _json.loads(
+        raw.execute(
+            "SELECT payload FROM supply_positions WHERE position_id = ?",
+            (victim["position_id"],),
+        ).fetchone()[0]
+    )
+    payload["closing_tonnes"] += 1000.0
+    raw.execute(
+        "UPDATE supply_positions SET closing_tonnes = closing_tonnes + 1000, "
+        "payload = ? WHERE position_id = ?",
+        (_json.dumps(payload), victim["position_id"]),
+    )
+    raw.commit()
+    if not service.verify_position("DAP", "2025-10"):
+        counters["position_tamper_undetected"] += 1
+    payload["closing_tonnes"] -= 1000.0
+    raw.execute(
+        "UPDATE supply_positions SET closing_tonnes = closing_tonnes - 1000, "
+        "payload = ? WHERE position_id = ?",
+        (_json.dumps(payload), victim["position_id"]),
+    )
+    raw.execute(
+        "UPDATE supply_position_lines SET tonnes = tonnes + 500 "
+        "WHERE position_id = ? AND component = 'import_arrivals'",
+        (victim["position_id"],),
+    )
+    raw.commit()
+    if not service.verify_position("DAP", "2025-10"):
+        counters["position_tamper_undetected"] += 1
+    raw.execute(
+        "UPDATE supply_position_lines SET tonnes = tonnes - 500 "
+        "WHERE position_id = ? AND component = 'import_arrivals'",
+        (victim["position_id"],),
+    )
+    raw.commit()
+    raw.close()
+    if service.verify_position("DAP", "2025-10"):
+        counters["position_tamper_undetected"] += 1
+
+    print("Round 1+2+3+4 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
