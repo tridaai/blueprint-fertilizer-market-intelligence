@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from . import alert_rules as alert_pack
+from . import dashboard as dashboard_engine
 from . import demand as demand_engine
 from . import field as field_engine
 from . import field_rules as field_pack
@@ -883,6 +884,151 @@ class MarketService:
         if row is None:
             return [f"no such field assessment: {assessment_id}"]
         return field_engine.verify_assessment(self.store, row)
+
+    # -- plain-language dashboards (R8) ---------------------------------
+
+    def ask_question(self, question, asked_by, as_of, role=None,
+                     name=None, port=None) -> dict:
+        """Ask a plain-language business question. The
+        question parses into a dashboard spec under the
+        dashboard pack — the offline profile's deterministic
+        grammar by default; a hosted profile's proposals are
+        validated against the governed schema, and a proposal
+        that does not fit is refused, recorded, and rendered
+        as a gap. The spec is stored insert-only with its
+        artefact bindings resolved at ask time
+        (compute-or-return). asked_by is required: a question
+        in this system is attributed, never anonymous."""
+        if not asked_by:
+            raise ValueError(
+                "asked_by is required — a dashboard question is "
+                "attributed, never anonymous")
+        if port is not None or self.settings.model_profile != "offline":
+            model_port = port or get_model_port(self.settings.model_profile)
+            panels, parse = dashboard_engine.parse_question_model(
+                self.store, model_port, question)
+        else:
+            panels, parse = dashboard_engine.parse_question_grammar(
+                self.store, question)
+        return self._store_spec(
+            question, asked_by, as_of, panels, parse,
+            role=role, name=name,
+            saved_by=asked_by if name else None)
+
+    def role_default_dashboard(self, role, asked_by, as_of) -> dict:
+        """A role's default dashboard, built from the pack's
+        stated panel list through the same spec machinery as
+        an asked question. An unknown role is refused by the
+        pack lookup."""
+        if not asked_by:
+            raise ValueError(
+                "asked_by is required — a dashboard is attributed, "
+                "never anonymous")
+        label, panels = dashboard_engine.role_default_panels(
+            self.store, role)
+        parse = {"profile": "pack", "model": "role_default",
+                 "rules": [f"role_default:{role}"], "refusals": [],
+                 "notes": []}
+        return self._store_spec(
+            label, asked_by, as_of, panels, parse, role=role,
+            name=f"default:{role}", saved_by=asked_by)
+
+    def _store_spec(self, question, asked_by, as_of, panels, parse,
+                    role=None, name=None, saved_by=None) -> dict:
+        for panel in panels:
+            if panel.kind != "gap":
+                resolved = dashboard_engine.resolve_panel(
+                    self, panel.model_dump(), as_of)
+                panel.binding_artefact_ids = resolved["artefact_ids"]
+        spec = dashboard_engine.build_spec(
+            question, asked_by, as_of, panels, parse,
+            role=role, name=name, saved_by=saved_by)
+        existing = self.store.dashboard_spec_by_fingerprint(spec.fingerprint)
+        if existing is not None:
+            return existing
+        self.store.insert_dashboard_spec(spec.model_dump())
+        return spec.model_dump()
+
+    def get_dashboard_spec(self, spec_id) -> dict | None:
+        return self.store.get_dashboard_spec(spec_id)
+
+    def list_dashboard_specs(self, name=None, saved_by=None) -> list[dict]:
+        return self.store.dashboard_specs(name=name, saved_by=saved_by)
+
+    def assemble_dashboard(self, spec_id, assembled_on) -> dict:
+        """Assemble (or return) the dashboard for a spec at a
+        date. Assembly re-resolves every panel to the current
+        head, verifies every figure against its artefact
+        before storing, and diffs against the previous
+        assembly. A figure mismatch refuses the whole
+        dashboard — nothing partial is stored."""
+        spec = self.store.get_dashboard_spec(spec_id)
+        if spec is None:
+            raise ValueError(f"no such dashboard spec: {spec_id}")
+        assembly = dashboard_engine.assemble(self, spec, assembled_on)
+        existing = self.store.get_dashboard_assembly(assembly.assembly_id)
+        if existing is not None:
+            return existing
+        self.store.insert_dashboard_assembly(assembly.model_dump())
+        return assembly.model_dump()
+
+    def get_dashboard_assembly(self, assembly_id) -> dict | None:
+        return self.store.get_dashboard_assembly(assembly_id)
+
+    def list_dashboard_assemblies(self, spec_id) -> list[dict]:
+        return self.store.dashboard_assemblies(spec_id)
+
+    def dashboard_html(self, spec_id) -> str | None:
+        """The current head assembly's rendered page for a
+        spec, assembling at the spec's as-of when the spec
+        has never been assembled."""
+        spec = self.store.get_dashboard_spec(spec_id)
+        if spec is None:
+            return None
+        head = dashboard_engine.head_of(
+            self.store.dashboard_assemblies(spec_id), "assembly_id")
+        if head is not None:
+            return head["html"]
+        return self.assemble_dashboard(spec_id, spec["as_of"])["html"]
+
+    def verify_dashboard(self, assembly_id) -> dict:
+        assembly = self.store.get_dashboard_assembly(assembly_id)
+        if assembly is None:
+            raise ValueError(f"no such dashboard assembly: {assembly_id}")
+        problems = dashboard_engine.verify_assembly(self.store, assembly)
+        return {"assembly_id": assembly_id,
+                "verified": not problems, "problems": problems}
+
+    def verify_dashboard_spec(self, spec_id) -> dict:
+        """Re-perform a spec: a grammar-parsed spec must
+        re-parse to the same panels, and every recorded parse
+        refusal must be carried by a gap panel on the spec —
+        a refusal that exists only in the provenance, with no
+        gap rendered for it, is a defect."""
+        spec = self.store.get_dashboard_spec(spec_id)
+        if spec is None:
+            raise ValueError(f"no such dashboard spec: {spec_id}")
+        problems: list[str] = []
+        if spec["parse"].get("profile") == "offline":
+            panels, _ = dashboard_engine.parse_question_grammar(
+                self.store, spec["question"])
+            reparsed = [(p.kind, p.scope) for p in panels]
+            stored = [(p["kind"], p["scope"]) for p in spec["panels"]]
+            if reparsed != stored:
+                problems.append(
+                    "the spec's panels do not re-perform from its "
+                    "question under the grammar")
+        refusals = spec["parse"].get("refusals", [])
+        gap_refusals = [
+            p for p in spec["panels"]
+            if p["origin"].get("rule") == "model:refused_proposal"
+        ]
+        if len(gap_refusals) < len(refusals):
+            problems.append(
+                f"{len(refusals)} parse refusals are recorded but only "
+                f"{len(gap_refusals)} gap panels carry them")
+        return {"spec_id": spec_id, "verified": not problems,
+                "problems": problems}
 
     def ready(self) -> bool:
         return self.store.get_manifest() is not None and all(

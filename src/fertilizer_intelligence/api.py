@@ -11,10 +11,11 @@ import logging
 from datetime import date
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .config import Settings
+from .dashboard import DashboardRefused
 from .demand import NarrativeRefused
 from .field import FieldReviewError
 from .logging_config import configure_logging, new_request_id, request_id_var
@@ -111,6 +112,18 @@ class FieldReviewRequest(BaseModel):
     reason: str
     note: str | None = None
     as_of: str | None = None
+
+
+class AskRequest(BaseModel):
+    question: str
+    asked_by: str
+    as_of: str | None = None
+    role: str | None = None
+    name: str | None = None
+
+
+class AssembleRequest(BaseModel):
+    assembled_on: str | None = None
 
 
 class FieldAssessmentRequest(BaseModel):
@@ -811,6 +824,95 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "assessment_id": assessment["assessment_id"],
             "ok": not problems, "problems": problems,
         }
+
+    # -- plain-language dashboards (R8) ------------------------
+
+    @app.post("/dashboards/ask")
+    def ask_dashboard(body: AskRequest) -> dict:
+        try:
+            return service.ask_question(
+                body.question, body.asked_by,
+                body.as_of or date.today().isoformat(),
+                role=body.role, name=body.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/dashboards/specs")
+    def list_dashboard_specs(
+        name: str | None = None, saved_by: str | None = None,
+    ) -> list[dict]:
+        return service.list_dashboard_specs(name=name, saved_by=saved_by)
+
+    @app.get("/dashboards/specs/{spec_id}")
+    def get_dashboard_spec(spec_id: str) -> dict:
+        spec = service.get_dashboard_spec(spec_id)
+        if spec is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such dashboard spec: {spec_id}")
+        return spec
+
+    @app.get("/dashboards/specs/{spec_id}/verify")
+    def verify_dashboard_spec(spec_id: str) -> dict:
+        try:
+            return service.verify_dashboard_spec(spec_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/dashboards/specs/{spec_id}/assemble")
+    def assemble_dashboard(spec_id: str, body: AssembleRequest) -> dict:
+        if service.get_dashboard_spec(spec_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such dashboard spec: {spec_id}")
+        try:
+            return service.assemble_dashboard(
+                spec_id, body.assembled_on or date.today().isoformat())
+        except DashboardRefused as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/dashboards/specs/{spec_id}/html")
+    def dashboard_html(spec_id: str) -> HTMLResponse:
+        page = service.dashboard_html(spec_id)
+        if page is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such dashboard spec: {spec_id}")
+        return HTMLResponse(content=page)
+
+    @app.get("/dashboards/assemblies/{assembly_id}")
+    def get_dashboard_assembly(assembly_id: str) -> dict:
+        assembly = service.get_dashboard_assembly(assembly_id)
+        if assembly is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such dashboard assembly: {assembly_id}")
+        return assembly
+
+    @app.get("/dashboards/assemblies/{assembly_id}/verify")
+    def verify_dashboard_assembly(assembly_id: str) -> dict:
+        try:
+            return service.verify_dashboard(assembly_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/dashboards/assemblies/{assembly_id}/html")
+    def dashboard_assembly_html(assembly_id: str) -> HTMLResponse:
+        assembly = service.get_dashboard_assembly(assembly_id)
+        if assembly is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such dashboard assembly: {assembly_id}")
+        return HTMLResponse(content=assembly["html"])
+
+    @app.get("/dashboards/roles/{role}")
+    def role_dashboard(
+        role: str, asked_by: str, as_of: str | None = None,
+    ) -> dict:
+        try:
+            return service.role_default_dashboard(
+                role, asked_by, as_of or date.today().isoformat())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return app
 

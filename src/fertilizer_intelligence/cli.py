@@ -281,6 +281,35 @@ def main(argv=None) -> int:
     p.add_argument("--season", required=True)
     p.add_argument("--as-of", default=None)
 
+    p = sub.add_parser("ask", help="ask a plain-language question; returns the dashboard spec")
+    p.add_argument("--question", required=True)
+    p.add_argument("--asked-by", required=True)
+    p.add_argument("--as-of", default=None)
+    p.add_argument("--role", default=None)
+    p.add_argument("--name", default=None)
+
+    p = sub.add_parser("dashboards", help="list saved dashboard specs")
+    p.add_argument("--name", default=None)
+    p.add_argument("--saved-by", default=None)
+
+    p = sub.add_parser("dashboard-spec", help="read one dashboard spec")
+    p.add_argument("spec_id")
+
+    p = sub.add_parser("assemble", help="assemble a spec into a verified dashboard")
+    p.add_argument("spec_id")
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("dashboard", help="print a spec's current dashboard HTML")
+    p.add_argument("spec_id")
+
+    p = sub.add_parser("verify-dashboard", help="re-perform every figure on a stored assembly")
+    p.add_argument("assembly_id")
+
+    p = sub.add_parser("role-dashboard", help="build a role's default dashboard spec")
+    p.add_argument("--role", required=True)
+    p.add_argument("--asked-by", required=True)
+    p.add_argument("--as-of", default=None)
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -563,6 +592,35 @@ def main(argv=None) -> int:
                 "assessment_id": assessment["assessment_id"],
                 "ok": not problems, "problems": problems,
             }
+        elif args.command == "ask":
+            result = service.ask_question(
+                args.question, args.asked_by, as_of,
+                role=args.role, name=args.name,
+            )
+        elif args.command == "dashboards":
+            result = service.list_dashboard_specs(
+                name=args.name, saved_by=args.saved_by)
+        elif args.command == "dashboard-spec":
+            result = service.get_dashboard_spec(args.spec_id)
+            if result is None:
+                print(f"no such dashboard spec: {args.spec_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "assemble":
+            result = service.assemble_dashboard(args.spec_id, as_of)
+        elif args.command == "dashboard":
+            page = service.dashboard_html(args.spec_id)
+            if page is None:
+                print(f"no such dashboard spec: {args.spec_id}",
+                      file=sys.stderr)
+                return 2
+            print(page)
+            return 0
+        elif args.command == "verify-dashboard":
+            result = service.verify_dashboard(args.assembly_id)
+        elif args.command == "role-dashboard":
+            result = service.role_default_dashboard(
+                args.role, args.asked_by, as_of)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except NarrativeRefused as exc:
