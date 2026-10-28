@@ -708,6 +708,144 @@ class MarketStore:
         rows = self._rows(sql + " ORDER BY registry_id, note_id", tuple(params))
         return [self._impact_note_row(row) for row in rows]
 
+    # -- Round 6: competitor observations, shares, movements --
+    # Observations are artefacts promoted from the tracked
+    # points, carrying their provenance on their face; shares
+    # and movements are computed artefacts. All insert-only,
+    # superseding by link, the full artefact as a JSON payload.
+
+    def insert_competitor_observation(self, observation: dict) -> None:
+        self._insert_many(
+            "competitor_observations",
+            ["observation_id", "competitor", "region", "product", "month",
+             "crop_year", "season", "volume_tonnes", "price", "source",
+             "as_of", "payload"],
+            [(
+                observation["observation_id"], observation["competitor"],
+                observation["region"], observation["product"],
+                observation["month"], observation["crop_year"],
+                observation["season"], observation["volume_tonnes"],
+                observation["price"], observation["source"],
+                observation["as_of"], json.dumps(observation),
+            )],
+        )
+
+    def _observation_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_competitor_observation(self, observation_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM competitor_observations WHERE observation_id = {self._ph}",
+            (observation_id,),
+        )
+        return self._observation_row(rows[0]) if rows else None
+
+    def list_competitor_observations(
+        self, competitor=None, region=None, product=None, season=None
+    ) -> list[dict]:
+        sql, params = "SELECT * FROM competitor_observations WHERE 1=1", []
+        for column, value in (
+            ("competitor", competitor), ("region", region),
+            ("product", product), ("season", season),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY competitor, region, product, month", tuple(params)
+        )
+        return [self._observation_row(row) for row in rows]
+
+    def insert_share(self, share: dict) -> None:
+        self._insert_many(
+            "market_shares",
+            ["share_id", "district_id", "product", "crop_year", "season",
+             "as_of", "status", "rules_version", "fact_fingerprint",
+             "supersedes", "payload"],
+            [(
+                share["share_id"], share["district_id"], share["product"],
+                share["crop_year"], share["season"], share["as_of"],
+                share["status"], share["rules_version"],
+                share["fact_fingerprint"], share["supersedes"],
+                json.dumps(share),
+            )],
+        )
+
+    def _share_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_share(self, share_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM market_shares WHERE share_id = {self._ph}",
+            (share_id,),
+        )
+        return self._share_row(rows[0]) if rows else None
+
+    def list_shares(
+        self, district_id=None, product=None, crop_year=None, season=None,
+        as_of=None,
+    ) -> list[dict]:
+        sql, params = "SELECT * FROM market_shares WHERE 1=1", []
+        for column, value in (
+            ("district_id", district_id), ("product", product),
+            ("crop_year", crop_year), ("season", season), ("as_of", as_of),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY district_id, product, crop_year, season, as_of, share_id",
+            tuple(params),
+        )
+        return [self._share_row(row) for row in rows]
+
+    def insert_share_movement(self, movement: dict) -> None:
+        self._insert_many(
+            "share_movements",
+            ["movement_id", "district_id", "product", "season",
+             "from_crop_year", "to_crop_year", "biggest_mover",
+             "rules_version", "fact_fingerprint", "as_of", "supersedes",
+             "payload"],
+            [(
+                movement["movement_id"], movement["district_id"],
+                movement["product"], movement["season"],
+                movement["from_crop_year"], movement["to_crop_year"],
+                movement["biggest_mover"]["seller"], movement["rules_version"],
+                movement["fact_fingerprint"], movement["as_of"],
+                movement["supersedes"], json.dumps(movement),
+            )],
+        )
+
+    def _share_movement_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_share_movement(self, movement_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM share_movements WHERE movement_id = {self._ph}",
+            (movement_id,),
+        )
+        return self._share_movement_row(rows[0]) if rows else None
+
+    def list_share_movements(
+        self, district_id=None, product=None, season=None
+    ) -> list[dict]:
+        sql, params = "SELECT * FROM share_movements WHERE 1=1", []
+        for column, value in (
+            ("district_id", district_id), ("product", product),
+            ("season", season),
+        ):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY district_id, product, season, movement_id",
+            tuple(params),
+        )
+        return [self._share_movement_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
