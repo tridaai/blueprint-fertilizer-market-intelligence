@@ -72,14 +72,15 @@ ROLES = tuple(ROLE_LANES)
 # an ordinary month-on-month move, which outranks a
 # sustained crawl. The band itself ranks by the alert
 # pack's BAND_RANK (alert above watch).
-RULE_RANK = {"spike": 3, "baseline": 2, "mom": 1, "sustained_move": 0}
+RULE_RANK = {"spike": 3, "baseline_move": 2, "mom_move": 1,
+             "sustained_move": 0}
 
 # The figure an alert row is ranked and read by, per rule:
 # the move that fired it.
 RULE_FIGURE = {
     "spike": "mom_pct",
-    "mom": "mom_pct",
-    "baseline": "baseline_pct",
+    "mom_move": "mom_pct",
+    "baseline_move": "baseline_pct",
     "sustained_move": "cumulative_pct",
 }
 
