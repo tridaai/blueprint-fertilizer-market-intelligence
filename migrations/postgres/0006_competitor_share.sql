@@ -27,8 +27,8 @@ CREATE TABLE IF NOT EXISTS competitor_observations (
     month TEXT NOT NULL,
     crop_year TEXT,
     season TEXT,
-    volume_tonnes REAL NOT NULL,
-    price REAL NOT NULL,
+    volume_tonnes DOUBLE PRECISION NOT NULL,
+    price DOUBLE PRECISION NOT NULL,
     source TEXT NOT NULL,
     as_of TEXT NOT NULL,
     payload TEXT NOT NULL

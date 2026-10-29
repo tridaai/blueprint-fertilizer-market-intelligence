@@ -51,7 +51,7 @@ CREATE TABLE season_actuals (
     season          TEXT NOT NULL,
     product         TEXT NOT NULL,
     actual_kind     TEXT NOT NULL,
-    quantity_tonnes REAL NOT NULL,
+    quantity_tonnes DOUBLE PRECISION NOT NULL,
     source          TEXT NOT NULL,
     as_of           TEXT NOT NULL,
     PRIMARY KEY (district_id, crop_year, season, product, actual_kind)

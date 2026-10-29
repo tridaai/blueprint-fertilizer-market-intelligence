@@ -50,9 +50,20 @@ def settings(tmp_path):
         # boot holds locks on its schema's tables.
         admin.execute("SET lock_timeout = '20s'")
         admin.execute(f'CREATE SCHEMA "{schema}"')
+        url = _schema_url(_PG_BASE_URL, schema)
+        # Surfaces that take their store from the
+        # environment (the CLI) must land on this test's
+        # schema too — point DATABASE_URL at it for the
+        # duration of the test.
+        previous_url = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = url
         try:
-            yield _settings(_schema_url(_PG_BASE_URL, schema), tmp_path)
+            yield _settings(url, tmp_path)
         finally:
+            if previous_url is None:
+                os.environ.pop("DATABASE_URL", None)
+            else:
+                os.environ["DATABASE_URL"] = previous_url
             # A surface under test may hold a store connection
             # the fixtures never see (the API app builds its
             # own service); its open read transaction would

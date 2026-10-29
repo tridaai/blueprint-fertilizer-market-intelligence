@@ -23,7 +23,7 @@ CREATE TABLE demand_contributions (
     line_no INTEGER NOT NULL,
     driver TEXT NOT NULL,
     status TEXT NOT NULL,
-    factor REAL,
+    factor DOUBLE PRECISION,
     delta_tonnes DOUBLE PRECISION NOT NULL,
     value_after_tonnes DOUBLE PRECISION NOT NULL,
     inputs TEXT NOT NULL,

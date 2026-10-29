@@ -75,7 +75,16 @@ class MarketStore:
         # is how the Postgres profile hid this until R11 ran
         # the suite against it).
         cur = self._conn.cursor()
-        cur.executemany(sql, rows)
+        try:
+            cur.executemany(sql, rows)
+        except Exception:
+            # A refused insert (a duplicate, under the
+            # insert-only discipline) must not poison the
+            # connection: on Postgres the failed statement
+            # aborts the transaction, and every later command
+            # would fail until a rollback.
+            self._conn.rollback()
+            raise
         self._conn.commit()
         return len(rows)
 
@@ -266,6 +275,15 @@ class MarketStore:
     # a recomputation is a new row linked by supersedes.
 
     def insert_estimate(self, estimate: dict, contributions: list[dict]) -> None:
+        try:
+            self._insert_estimate(estimate, contributions)
+        except Exception:
+            # Same discipline as _insert_many: a refused
+            # insert leaves the connection usable.
+            self._conn.rollback()
+            raise
+
+    def _insert_estimate(self, estimate: dict, contributions: list[dict]) -> None:
         self._conn.execute(
             f"INSERT INTO demand_estimates (estimate_id, district_id, product, "
             f"crop_year, season, status, base_tonnes, total_tonnes, missing_drivers, "
@@ -976,7 +994,7 @@ class MarketStore:
         self._conn.execute(
             "INSERT INTO dashboard_specs (spec_id, fingerprint, question,"
             " asked_by, role, name, saved_by, as_of, rules_version, payload)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (" + ", ".join([self._ph] * 10) + ")",
             (spec["spec_id"], spec["fingerprint"], spec["question"],
              spec["asked_by"], spec.get("role"), spec.get("name"),
              spec.get("saved_by"), spec["as_of"], spec["rules_version"],
@@ -994,12 +1012,12 @@ class MarketStore:
 
     def get_dashboard_spec(self, spec_id: str) -> dict | None:
         return self._spec_row(self._conn.execute(
-            "SELECT * FROM dashboard_specs WHERE spec_id = ?", (spec_id,),
+            f"SELECT * FROM dashboard_specs WHERE spec_id = {self._ph}", (spec_id,),
         ).fetchone())
 
     def dashboard_spec_by_fingerprint(self, fingerprint: str) -> dict | None:
         return self._spec_row(self._conn.execute(
-            "SELECT * FROM dashboard_specs WHERE fingerprint = ?",
+            f"SELECT * FROM dashboard_specs WHERE fingerprint = {self._ph}",
             (fingerprint,),
         ).fetchone())
 
@@ -1017,7 +1035,7 @@ class MarketStore:
         self._conn.execute(
             "INSERT INTO dashboard_assemblies (assembly_id, fingerprint,"
             " spec_id, supersedes, assembled_on, payload)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            " VALUES (" + ", ".join([self._ph] * 6) + ")",
             (assembly["assembly_id"], assembly["fingerprint"],
              assembly["spec_id"], assembly.get("supersedes"),
              assembly["assembled_on"],
@@ -1035,13 +1053,13 @@ class MarketStore:
 
     def get_dashboard_assembly(self, assembly_id: str) -> dict | None:
         return self._assembly_row(self._conn.execute(
-            "SELECT * FROM dashboard_assemblies WHERE assembly_id = ?",
+            f"SELECT * FROM dashboard_assemblies WHERE assembly_id = {self._ph}",
             (assembly_id,),
         ).fetchone())
 
     def dashboard_assemblies(self, spec_id: str) -> list[dict]:
         rows = self._conn.execute(
-            "SELECT * FROM dashboard_assemblies WHERE spec_id = ?"
+            f"SELECT * FROM dashboard_assemblies WHERE spec_id = {self._ph}"
             " ORDER BY assembled_on, assembly_id", (spec_id,),
         ).fetchall()
         return [self._assembly_row(r) for r in rows]

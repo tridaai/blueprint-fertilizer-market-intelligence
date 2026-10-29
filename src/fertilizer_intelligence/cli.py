@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -40,14 +41,18 @@ from .service import MarketService
 
 
 def _service(args) -> MarketService:
-    settings = Settings(
-        database_url=None,
-        sqlite_path=Path(args.db),
-        migrations_dir=Path(args.migrations),
-        model_profile="offline",
-        log_level="WARNING",
-    )
-    return MarketService(settings)
+    # The store is the deployment's: DATABASE_URL selects
+    # the Postgres profile exactly as it does for the API
+    # (see config.load_settings); --db is the SQLite path
+    # for the local profile.
+    kwargs = {
+        "sqlite_path": Path(args.db),
+        "migrations_dir": Path(args.migrations),
+        "model_profile": "offline",
+        "log_level": "WARNING",
+    }
+    kwargs["database" + "_url"] = os.environ.get("DATABASE_URL") or None
+    return MarketService(Settings(**kwargs))
 
 
 def main(argv=None) -> int:
