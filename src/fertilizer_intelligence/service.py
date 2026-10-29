@@ -12,6 +12,7 @@ import json
 import logging
 
 from . import alert_rules as alert_pack
+from . import board as board_engine
 from . import brief as brief_engine
 from . import brief_rules as brief_pack
 from . import dashboard as dashboard_engine
@@ -20,8 +21,11 @@ from . import field as field_engine
 from . import field_rules as field_pack
 from . import ingest as ingest_engine
 from . import ingest_rules as ingest_pack
+from . import market_map as map_engine
 from . import movements as movement_engine
 from . import policy as policy_engine
+from . import queue as queue_engine
+from . import queue_rules as queue_pack
 from . import scenario as scenario_engine
 from . import scoring as scoring_engine
 from . import share as share_engine
@@ -1720,6 +1724,262 @@ class MarketService:
         to struck estimates by natural key — unmatched rows
         reported, never dropped."""
         return ingest_engine.actuals_report(self.store, crop_year, season)
+
+    # -- market map, morning board, gap queue (R13) -----------
+
+    def _ensure_map_inputs(self, crop_year, season, as_of):
+        """Strike the artefacts a map composes from: the
+        season's outlook and its prior-year baseline, the
+        positionable products' gaps, and a field assessment
+        for every district x product cell. All
+        compute-or-return, so ensuring is cheap on a warm
+        store."""
+        self.demand_outlook(crop_year, season, as_of)
+        self.demand_outlook(
+            map_engine.prior_crop_year(crop_year), season, as_of)
+        positionable = supply_engine.positionable_products(self.store)
+        for product in PRODUCTS:
+            if product in positionable:
+                self.supply_gap(product, crop_year, season, as_of)
+        for district in self.store.list_districts():
+            for product in PRODUCTS:
+                self.field_signal_assessment(
+                    district["district_id"], product, crop_year, season,
+                    as_of)
+
+    def market_map(self, crop_year, season, built_by, as_of) -> dict:
+        """Build the district map for one season.
+
+        The candidate is composed from the current artefact
+        heads and re-performed cell for cell before anything
+        is stored. One mismatched cell refuses the whole
+        map: a refusal artefact is recorded with its
+        reasons and MapRefused is raised. Compute-or-return:
+        an unchanged record returns the stored map."""
+        if not built_by or not built_by.strip():
+            raise ValueError(
+                "a map names who built it — an unnamed build is refused")
+        self._ensure_map_inputs(crop_year, season, as_of)
+        candidate = map_engine.build_map(
+            self.store, crop_year, season, as_of, built_by)
+        problems = map_engine.build_problems(
+            self.store, candidate.model_dump())
+        problems += map_engine.verify_map(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = map_engine.build_refusal(
+                crop_year, season, as_of, built_by, problems)
+            if self.store.get_map_refusal(refusal.refusal_id) is None:
+                self.store.insert_map_refusal(refusal.model_dump())
+            raise map_engine.MapRefused(problems, refusal.refusal_id)
+        existing = self.store.get_market_map(candidate.map_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_market_maps(crop_year, season), "map_id")
+        if head is not None and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["map_id"] if head else None})
+        self.store.insert_market_map(candidate.model_dump())
+        log.info("market map stored: %s", candidate.map_id)
+        return self.store.get_market_map(candidate.map_id)
+
+    def get_map(self, map_id) -> dict | None:
+        return self.store.get_market_map(map_id)
+
+    def list_maps(self, crop_year=None, season=None) -> list[dict]:
+        return self.store.list_market_maps(crop_year, season)
+
+    def verify_map(self, map_id) -> dict:
+        row = self.store.get_market_map(map_id)
+        if row is None:
+            raise ValueError(f"no such market map: {map_id}")
+        problems = map_engine.verify_map(self.store, row)
+        return {"map_id": map_id, "verified": not problems,
+                "problems": problems}
+
+    def map_html(self, map_id) -> str | None:
+        row = self.store.get_market_map(map_id)
+        return row["html"] if row else None
+
+    def list_map_refusals(self, crop_year=None, season=None) -> list[dict]:
+        return self.store.list_map_refusals(crop_year, season)
+
+    def morning_board(self, role, crop_year, season, built_by,
+                      as_of) -> dict:
+        """Build the morning board for one role and season.
+
+        The map for the scope is ensured first (the board's
+        district lane names its head), and the scope's share
+        artefacts are ensured for the stale lane. The
+        candidate board is re-derived lane for lane before
+        anything is stored; one wrong row refuses the whole
+        board and records a refusal artefact."""
+        if not built_by or not built_by.strip():
+            raise ValueError(
+                "a board names who built it — an unnamed build "
+                "is refused")
+        self.market_map(crop_year, season, built_by, as_of)
+        for district in self.store.list_districts():
+            for product in PRODUCTS:
+                self.market_share(
+                    district["district_id"], product, crop_year, season,
+                    as_of)
+        map_head = demand_engine.head_of(
+            self.store.list_market_maps(crop_year, season), "map_id")
+        candidate = board_engine.build_board(
+            self.store, role, crop_year, season, as_of, built_by,
+            map_id=map_head["map_id"] if map_head else None)
+        problems = board_engine.verify_board(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = board_engine.build_refusal(
+                role, crop_year, season, as_of, built_by, problems)
+            if self.store.get_board_refusal(refusal.refusal_id) is None:
+                self.store.insert_board_refusal(refusal.model_dump())
+            raise board_engine.BoardRefused(problems, refusal.refusal_id)
+        existing = self.store.get_morning_board(candidate.board_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_morning_boards(role, crop_year, season),
+            "board_id")
+        if head is not None and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["board_id"] if head else None})
+        self.store.insert_morning_board(candidate.model_dump())
+        log.info("morning board stored: %s", candidate.board_id)
+        return self.store.get_morning_board(candidate.board_id)
+
+    def get_board(self, board_id) -> dict | None:
+        return self.store.get_morning_board(board_id)
+
+    def list_boards(self, role=None, crop_year=None,
+                    season=None) -> list[dict]:
+        return self.store.list_morning_boards(role, crop_year, season)
+
+    def verify_board(self, board_id) -> dict:
+        row = self.store.get_morning_board(board_id)
+        if row is None:
+            raise ValueError(f"no such morning board: {board_id}")
+        problems = board_engine.verify_board(self.store, row)
+        return {"board_id": board_id, "verified": not problems,
+                "problems": problems}
+
+    def board_html(self, board_id) -> str | None:
+        row = self.store.get_morning_board(board_id)
+        return row["html"] if row else None
+
+    def list_board_refusals(self, role=None, crop_year=None,
+                            season=None) -> list[dict]:
+        return self.store.list_board_refusals(role, crop_year, season)
+
+    def gap_queue(self, as_of) -> list[dict]:
+        """The gap action queue at a date: strike an item
+        for any member gap that lacks one — each with the
+        pack's default owner for its product — then read
+        the queue views in membership order."""
+        for gap in queue_engine.member_gaps(self.store):
+            if self.store.get_queue_item(
+                    queue_engine.item_id_for(gap)) is None:
+                item = queue_engine.build_item(gap, as_of)
+                self.store.insert_queue_item(item.model_dump())
+                log.info("queue item struck: %s for gap %s",
+                         item.item_id, gap["gap_id"])
+        return queue_engine.queue_views(self.store, as_of)
+
+    def queue_item(self, item_id, as_of) -> dict | None:
+        item = self.store.get_queue_item(item_id)
+        if item is None:
+            return None
+        return queue_engine.item_view(self.store, item, as_of)
+
+    def record_queue_act(self, item_id, act, actor, as_of, reason=None,
+                         owner=None, fork_id=None, note=None) -> dict:
+        """Record one act against a queue item, validated
+        against the item's derived state and the queue
+        pack: a close must speak the pack's reason
+        vocabulary, a link must name a stored scenario
+        fork, an assign must name the new owner, and no act
+        lands on a closed item."""
+        item = self.store.get_queue_item(item_id)
+        if item is None:
+            raise queue_engine.QueueStateError(
+                f"no such queue item: {item_id}")
+        if not actor or not actor.strip():
+            raise ValueError("a queue act needs a named actor")
+        if act not in queue_pack.ACTS:
+            raise ValueError(
+                f"unknown queue act: {act!r} — the queue pack "
+                f"names {list(queue_pack.ACTS)}")
+        acts = self.store.list_queue_acts(item_id)
+        state = queue_engine.derive_state(acts)
+        if act == queue_pack.ACT_ASSIGN:
+            if state == queue_pack.STATE_CLOSED:
+                raise queue_engine.QueueStateError(
+                    f"queue item {item_id} is closed: it cannot "
+                    "be reassigned")
+            if not owner or not owner.strip():
+                raise ValueError("an assign act names the new owner")
+        elif act == queue_pack.ACT_START:
+            if state != queue_pack.STATE_OPEN:
+                raise queue_engine.QueueStateError(
+                    f"queue item {item_id} is {state}: only an "
+                    "open item can be started")
+        elif act == queue_pack.ACT_LINK_SCENARIO:
+            if state == queue_pack.STATE_CLOSED:
+                raise queue_engine.QueueStateError(
+                    f"queue item {item_id} is closed: no scenario "
+                    "can be linked to it")
+            if not fork_id or self.store.get_scenario_fork(fork_id) is None:
+                raise ValueError(
+                    f"no such scenario fork: {fork_id!r} — a link "
+                    "names a stored fork, by reference")
+        elif act == queue_pack.ACT_CLOSE:
+            if state == queue_pack.STATE_CLOSED:
+                raise queue_engine.QueueStateError(
+                    f"queue item {item_id} is already closed")
+            if reason not in queue_pack.CLOSE_REASONS:
+                raise ValueError(
+                    f"closing reason must be one of "
+                    f"{sorted(queue_pack.CLOSE_REASONS)}")
+        act_row = queue_engine.QueueAct(
+            act_id=f"QACT-{item_id}-{len(acts) + 1:03d}",
+            item_id=item_id, act=act, actor=actor.strip(), as_of=as_of,
+            reason=reason, owner=owner.strip() if owner else None,
+            fork_id=fork_id, note=note,
+        )
+        self.store.insert_queue_act(act_row.model_dump())
+        log.info("queue act recorded: %s", act_row.act_id)
+        return queue_engine.item_view(self.store, item, as_of)
+
+    def assign_queue_item(self, item_id, actor, owner, as_of,
+                          note=None) -> dict:
+        return self.record_queue_act(
+            item_id, queue_pack.ACT_ASSIGN, actor, as_of, owner=owner,
+            note=note)
+
+    def start_queue_item(self, item_id, actor, as_of, note=None) -> dict:
+        return self.record_queue_act(
+            item_id, queue_pack.ACT_START, actor, as_of, note=note)
+
+    def link_queue_scenario(self, item_id, actor, fork_id, as_of,
+                            note=None) -> dict:
+        return self.record_queue_act(
+            item_id, queue_pack.ACT_LINK_SCENARIO, actor, as_of,
+            fork_id=fork_id, note=note)
+
+    def close_queue_item(self, item_id, actor, reason, as_of,
+                         note=None) -> dict:
+        return self.record_queue_act(
+            item_id, queue_pack.ACT_CLOSE, actor, as_of, reason=reason,
+            note=note)
+
+    def verify_queue(self, as_of) -> dict:
+        problems = queue_engine.verify_queue(self.store, as_of)
+        return {"verified": not problems, "problems": problems}
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is

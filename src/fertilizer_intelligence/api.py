@@ -14,13 +14,16 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from .board import BoardRefused
 from .brief import BriefRefused
 from .config import Settings
 from .dashboard import DashboardRefused
 from .demand import NarrativeRefused
 from .field import FieldReviewError
 from .logging_config import configure_logging, new_request_id, request_id_var
+from .market_map import MapRefused
 from .movements import AlertStateError
+from .queue import QueueStateError
 from .scoring import ScoringRefused
 from .service import MarketService
 
@@ -176,6 +179,31 @@ class ScoreRequest(BaseModel):
     season: str
     scored_by: str
     as_of: str
+
+
+class MapRequest(BaseModel):
+    crop_year: str
+    season: str
+    built_by: str
+    as_of: str
+
+
+class BoardRequest(BaseModel):
+    role: str
+    crop_year: str
+    season: str
+    built_by: str
+    as_of: str
+
+
+class QueueActRequest(BaseModel):
+    act: str
+    actor: str
+    as_of: str
+    reason: str | None = None
+    owner: str | None = None
+    fork_id: str | None = None
+    note: str | None = None
 
 
 class PackRequest(BaseModel):
@@ -1324,6 +1352,135 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/actuals/report")
     def actuals_report(crop_year: str, season: str) -> dict:
         return service.actuals_report(crop_year, season)
+
+    # -- market map, morning board & gap queue (R13) ----------
+
+    @app.post("/maps")
+    def build_map(body: MapRequest) -> dict:
+        try:
+            return service.market_map(
+                body.crop_year, body.season, body.built_by, body.as_of)
+        except MapRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/maps")
+    def list_maps(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_maps(crop_year, season)
+
+    @app.get("/maps/{map_id}")
+    def get_map(map_id: str) -> dict:
+        map_row = service.get_map(map_id)
+        if map_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such market map: {map_id}")
+        return map_row
+
+    @app.get("/maps/{map_id}/verify")
+    def verify_map(map_id: str) -> dict:
+        try:
+            return service.verify_map(map_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/maps/{map_id}/html")
+    def map_html(map_id: str) -> HTMLResponse:
+        page = service.map_html(map_id)
+        if page is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such market map: {map_id}")
+        return HTMLResponse(page)
+
+    @app.get("/map-refusals")
+    def list_map_refusals(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_map_refusals(crop_year, season)
+
+    @app.post("/boards")
+    def build_board(body: BoardRequest) -> dict:
+        try:
+            return service.morning_board(
+                body.role, body.crop_year, body.season, body.built_by,
+                body.as_of)
+        except BoardRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/boards")
+    def list_boards(
+        role: str | None = None, crop_year: str | None = None,
+        season: str | None = None,
+    ) -> list[dict]:
+        return service.list_boards(role, crop_year, season)
+
+    @app.get("/boards/{board_id}")
+    def get_board(board_id: str) -> dict:
+        board = service.get_board(board_id)
+        if board is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such morning board: {board_id}")
+        return board
+
+    @app.get("/boards/{board_id}/verify")
+    def verify_board(board_id: str) -> dict:
+        try:
+            return service.verify_board(board_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/boards/{board_id}/html")
+    def board_html(board_id: str) -> HTMLResponse:
+        page = service.board_html(board_id)
+        if page is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such morning board: {board_id}")
+        return HTMLResponse(page)
+
+    @app.get("/board-refusals")
+    def list_board_refusals(
+        role: str | None = None, crop_year: str | None = None,
+        season: str | None = None,
+    ) -> list[dict]:
+        return service.list_board_refusals(role, crop_year, season)
+
+    @app.get("/queue")
+    def get_queue(as_of: str) -> list[dict]:
+        return service.gap_queue(as_of)
+
+    @app.get("/queue/verify")
+    def verify_queue(as_of: str) -> dict:
+        return service.verify_queue(as_of)
+
+    @app.get("/queue/{item_id}")
+    def get_queue_item(item_id: str, as_of: str) -> dict:
+        view = service.queue_item(item_id, as_of)
+        if view is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such queue item: {item_id}")
+        return view
+
+    @app.post("/queue/{item_id}/acts")
+    def record_queue_act(item_id: str, body: QueueActRequest) -> dict:
+        try:
+            return service.record_queue_act(
+                item_id, body.act, body.actor, body.as_of,
+                reason=body.reason, owner=body.owner,
+                fork_id=body.fork_id, note=body.note)
+        except QueueStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return app
 

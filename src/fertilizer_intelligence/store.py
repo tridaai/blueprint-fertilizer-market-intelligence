@@ -1614,6 +1614,229 @@ class MarketStore:
                           "correction_id", tuple(params))
         return [self._correction_row(row) for row in rows]
 
+    # -- Round 13: market maps, morning boards, gap queue ----
+
+    def insert_market_map(self, map_row: dict) -> None:
+        self._insert_many(
+            "market_maps",
+            ["map_id", "fingerprint", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                map_row["map_id"], map_row["fingerprint"],
+                map_row["crop_year"], map_row["season"],
+                map_row["as_of"], map_row["built_by"],
+                map_row["rules_version"], json.dumps(map_row),
+            )],
+        )
+
+    def _market_map_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_market_map(self, map_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM market_maps WHERE map_id = {self._ph}",
+            (map_id,),
+        )
+        return self._market_map_row(rows[0]) if rows else None
+
+    def market_map_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM market_maps WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._market_map_row(rows[0]) if rows else None
+
+    def list_market_maps(self, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM market_maps WHERE 1=1", []
+        for column, value in (("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY crop_year, season, map_id",
+                          tuple(params))
+        return [self._market_map_row(row) for row in rows]
+
+    def insert_map_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "map_refusals",
+            ["refusal_id", "fingerprint", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["crop_year"], refusal["season"],
+                refusal["as_of"], refusal["built_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _map_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_map_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM map_refusals WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._map_refusal_row(rows[0]) if rows else None
+
+    def list_map_refusals(self, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM map_refusals WHERE 1=1", []
+        for column, value in (("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY crop_year, season, refusal_id",
+                          tuple(params))
+        return [self._map_refusal_row(row) for row in rows]
+
+    def insert_morning_board(self, board: dict) -> None:
+        self._insert_many(
+            "morning_boards",
+            ["board_id", "fingerprint", "role", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                board["board_id"], board["fingerprint"], board["role"],
+                board["crop_year"], board["season"], board["as_of"],
+                board["built_by"], board["rules_version"],
+                json.dumps(board),
+            )],
+        )
+
+    def _morning_board_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_morning_board(self, board_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM morning_boards WHERE board_id = {self._ph}",
+            (board_id,),
+        )
+        return self._morning_board_row(rows[0]) if rows else None
+
+    def morning_board_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM morning_boards "
+            f"WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._morning_board_row(rows[0]) if rows else None
+
+    def list_morning_boards(self, role=None, crop_year=None,
+                            season=None) -> list[dict]:
+        sql, params = "SELECT * FROM morning_boards WHERE 1=1", []
+        for column, value in (("role", role), ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY role, crop_year, season, "
+                          "board_id", tuple(params))
+        return [self._morning_board_row(row) for row in rows]
+
+    def insert_board_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "board_refusals",
+            ["refusal_id", "fingerprint", "role", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["role"], refusal["crop_year"], refusal["season"],
+                refusal["as_of"], refusal["built_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _board_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_board_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM board_refusals WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._board_refusal_row(rows[0]) if rows else None
+
+    def list_board_refusals(self, role=None, crop_year=None,
+                            season=None) -> list[dict]:
+        sql, params = "SELECT * FROM board_refusals WHERE 1=1", []
+        for column, value in (("role", role), ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY role, crop_year, season, "
+                          "refusal_id", tuple(params))
+        return [self._board_refusal_row(row) for row in rows]
+
+    def insert_queue_item(self, item: dict) -> None:
+        self._insert_many(
+            "queue_items",
+            ["item_id", "fingerprint", "gap_id", "product", "crop_year",
+             "season", "band", "struck_on", "due_date", "rules_version",
+             "payload"],
+            [(
+                item["item_id"], item["fingerprint"], item["gap_id"],
+                item["product"], item["crop_year"], item["season"],
+                item["band"], item["struck_on"], item["due_date"],
+                item["rules_version"], json.dumps(item),
+            )],
+        )
+
+    def _queue_item_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_queue_item(self, item_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM queue_items WHERE item_id = {self._ph}",
+            (item_id,),
+        )
+        return self._queue_item_row(rows[0]) if rows else None
+
+    def queue_item_for_gap(self, gap_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM queue_items WHERE gap_id = {self._ph}",
+            (gap_id,),
+        )
+        return self._queue_item_row(rows[0]) if rows else None
+
+    def list_queue_items(self, product=None, crop_year=None,
+                         season=None) -> list[dict]:
+        sql, params = "SELECT * FROM queue_items WHERE 1=1", []
+        for column, value in (("product", product),
+                              ("crop_year", crop_year), ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY product, crop_year, season, "
+                          "item_id", tuple(params))
+        return [self._queue_item_row(row) for row in rows]
+
+    def insert_queue_act(self, act: dict) -> None:
+        self._conn.execute(
+            f"INSERT INTO queue_acts (act_id, item_id, act, actor, "
+            f"as_of, reason, owner, fork_id, note) "
+            f"VALUES ({', '.join([self._ph] * 9)})",
+            (
+                act["act_id"], act["item_id"], act["act"], act["actor"],
+                act["as_of"], act["reason"], act["owner"], act["fork_id"],
+                act["note"],
+            ),
+        )
+        self._conn.commit()
+
+    def list_queue_acts(self, item_id: str) -> list[dict]:
+        return self._rows(
+            f"SELECT * FROM queue_acts WHERE item_id = {self._ph} "
+            "ORDER BY act_id",
+            (item_id,),
+        )
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:

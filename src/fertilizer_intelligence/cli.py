@@ -32,7 +32,10 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from .board import BoardRefused
 from .brief import BriefRefused
+from .market_map import MapRefused
+from .queue import QueueStateError
 from .scoring import ScoringRefused
 from .config import Settings
 from .demand import NarrativeRefused
@@ -412,6 +415,72 @@ def main(argv=None) -> int:
     p = sub.add_parser("score-refusals", help="list recorded score refusals")
     p.add_argument("--crop-year", default=None)
     p.add_argument("--season", default=None)
+
+    p = sub.add_parser("map", help="build (or return) the district market map for a season")
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("maps", help="list stored market maps")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("get-map", help="read one market map")
+    p.add_argument("map_id")
+
+    p = sub.add_parser("verify-map", help="re-perform every cell of a stored map")
+    p.add_argument("map_id")
+
+    p = sub.add_parser("map-html", help="print a map's rendered page")
+    p.add_argument("map_id")
+
+    p = sub.add_parser("map-refusals", help="list recorded map refusals")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("board", help="build (or return) a role's morning board")
+    p.add_argument("--role", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("boards", help="list stored morning boards")
+    p.add_argument("--role", default=None)
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("get-board", help="read one morning board")
+    p.add_argument("board_id")
+
+    p = sub.add_parser("verify-board", help="re-derive every lane of a stored board")
+    p.add_argument("board_id")
+
+    p = sub.add_parser("board-html", help="print a board's rendered page")
+    p.add_argument("board_id")
+
+    p = sub.add_parser("board-refusals", help="list recorded board refusals")
+    p.add_argument("--role", default=None)
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("queue", help="read the gap action queue at a date")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("queue-act", help="record an act against a queue item")
+    p.add_argument("item_id")
+    p.add_argument("--act", required=True,
+                   choices=["assign", "start", "link_scenario", "close"])
+    p.add_argument("--actor", required=True)
+    p.add_argument("--as-of", required=True)
+    p.add_argument("--reason", default=None)
+    p.add_argument("--owner", default=None)
+    p.add_argument("--fork-id", default=None)
+    p.add_argument("--note", default=None)
+
+    p = sub.add_parser("verify-queue", help="re-derive the queue's membership and folds")
+    p.add_argument("--as-of", required=True)
 
     p = sub.add_parser("pack", help="export a product or region report pack")
     p.add_argument("--kind", required=True, choices=["product", "region"])
@@ -894,6 +963,65 @@ def main(argv=None) -> int:
         elif args.command == "score-refusals":
             result = service.list_score_refusals(
                 args.crop_year, args.season)
+        elif args.command == "map":
+            result = service.market_map(
+                args.crop_year, args.season, args.by, args.as_of)
+        elif args.command == "maps":
+            result = service.list_maps(args.crop_year, args.season)
+        elif args.command == "get-map":
+            result = service.get_map(args.map_id)
+            if result is None:
+                print(f"no such market map: {args.map_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-map":
+            result = service.verify_map(args.map_id)
+        elif args.command == "map-html":
+            page = service.map_html(args.map_id)
+            if page is None:
+                print(f"no such market map: {args.map_id}",
+                      file=sys.stderr)
+                return 2
+            print(page)
+            return 0
+        elif args.command == "map-refusals":
+            result = service.list_map_refusals(
+                args.crop_year, args.season)
+        elif args.command == "board":
+            result = service.morning_board(
+                args.role, args.crop_year, args.season, args.by,
+                args.as_of)
+        elif args.command == "boards":
+            result = service.list_boards(
+                args.role, args.crop_year, args.season)
+        elif args.command == "get-board":
+            result = service.get_board(args.board_id)
+            if result is None:
+                print(f"no such morning board: {args.board_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-board":
+            result = service.verify_board(args.board_id)
+        elif args.command == "board-html":
+            page = service.board_html(args.board_id)
+            if page is None:
+                print(f"no such morning board: {args.board_id}",
+                      file=sys.stderr)
+                return 2
+            print(page)
+            return 0
+        elif args.command == "board-refusals":
+            result = service.list_board_refusals(
+                args.role, args.crop_year, args.season)
+        elif args.command == "queue":
+            result = service.gap_queue(args.as_of)
+        elif args.command == "queue-act":
+            result = service.record_queue_act(
+                args.item_id, args.act, args.actor, args.as_of,
+                reason=args.reason, owner=args.owner,
+                fork_id=args.fork_id, note=args.note)
+        elif args.command == "verify-queue":
+            result = service.verify_queue(args.as_of)
         elif args.command == "pack":
             result = service.export_pack(
                 args.kind, args.key, args.by, as_of)
@@ -969,6 +1097,19 @@ def main(argv=None) -> int:
         print(json.dumps(
             {"refused": exc.problems, "refusal_id": exc.refusal_id},
             indent=2), file=sys.stderr)
+        return 2
+    except MapRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except BoardRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except QueueStateError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
     except NarrativeRefused as exc:
         print(json.dumps({"refused": exc.problems}, indent=2), file=sys.stderr)

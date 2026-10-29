@@ -14,7 +14,7 @@
 # No uv? python3 -m venv .venv && source .venv/bin/activate, then:
 #   make install-pip
 
-.PHONY: install install-pip demo test evals serve harness cli smoke
+.PHONY: install install-pip demo test evals mapcheck serve harness cli smoke
 
 install:
 	uv sync --extra dev
@@ -35,6 +35,9 @@ test:
 
 evals:
 	uv run python evals/run_evals.py
+
+mapcheck:
+	uv run python scripts/check_map_board.py
 
 serve:
 	uv run uvicorn fertilizer_intelligence.api:app --port 8000
