@@ -31,6 +31,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from .brief import BriefRefused
 from .config import Settings
 from .demand import NarrativeRefused
 from .field import FieldReviewError
@@ -360,6 +361,54 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("verify-adoption", help="verify a stored adoption act")
     p.add_argument("adoption_id")
+
+    p = sub.add_parser("brief", help="assemble (or return) the weekly brief for a week")
+    p.add_argument("--week-ending", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", default=None)
+
+    p = sub.add_parser("briefs", help="list stored weekly briefs")
+    p.add_argument("--week-ending", default=None)
+
+    p = sub.add_parser("get-brief", help="read one weekly brief with its publication state")
+    p.add_argument("brief_id")
+
+    p = sub.add_parser("verify-brief", help="re-perform every figure in a stored brief")
+    p.add_argument("brief_id")
+
+    p = sub.add_parser("brief-html", help="print a brief's rendered page")
+    p.add_argument("brief_id")
+
+    p = sub.add_parser("brief-refusals", help="list recorded brief refusals")
+    p.add_argument("--week-ending", default=None)
+
+    p = sub.add_parser("pack", help="export a product or region report pack")
+    p.add_argument("--kind", required=True, choices=["product", "region"])
+    p.add_argument("--key", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", default=None)
+    p.add_argument("--out", default=None,
+                   help="also write the pack's files into this directory")
+
+    p = sub.add_parser("packs", help="list stored export packs")
+    p.add_argument("--kind", default=None)
+    p.add_argument("--key", default=None)
+
+    p = sub.add_parser("verify-pack", help="re-perform a stored pack and its files")
+    p.add_argument("pack_id")
+    p.add_argument("--dir", default=None,
+                   help="verify the files as they sit in this directory")
+
+    p = sub.add_parser("publish", help="publish an artefact version by a named act")
+    p.add_argument("--kind", required=True,
+                   choices=["weekly_brief", "season_outlook"])
+    p.add_argument("--artefact", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--note", default=None)
+
+    p = sub.add_parser("decision-log", help="the publication decision log, re-derived from the acts")
+    p = sub.add_parser("verify-decision-log", help="check the decision log's chains are gapless")
 
     args = parser.parse_args(argv)
     service = _service(args)
@@ -722,8 +771,57 @@ def main(argv=None) -> int:
                 return 2
         elif args.command == "verify-adoption":
             result = service.verify_adoption(args.adoption_id)
+        elif args.command == "brief":
+            result = service.weekly_brief(
+                args.week_ending, args.by, args.as_of)
+        elif args.command == "briefs":
+            result = service.list_briefs(args.week_ending)
+        elif args.command == "get-brief":
+            result = service.get_brief(args.brief_id)
+            if result is None:
+                print(f"no such weekly brief: {args.brief_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-brief":
+            result = service.verify_brief(args.brief_id)
+        elif args.command == "brief-html":
+            page = service.brief_html(args.brief_id)
+            if page is None:
+                print(f"no such weekly brief: {args.brief_id}",
+                      file=sys.stderr)
+                return 2
+            print(page)
+            return 0
+        elif args.command == "brief-refusals":
+            result = service.list_brief_refusals(args.week_ending)
+        elif args.command == "pack":
+            result = service.export_pack(
+                args.kind, args.key, args.by, as_of)
+            if args.out:
+                written = service.write_pack(result["pack_id"], args.out)
+                result = {**result, "files_written": written}
+        elif args.command == "packs":
+            result = service.list_packs(args.kind, args.key)
+        elif args.command == "verify-pack":
+            if args.dir:
+                result = service.verify_pack_dir(args.pack_id, args.dir)
+            else:
+                result = service.verify_pack(args.pack_id)
+        elif args.command == "publish":
+            result = service.publish_artefact(
+                args.kind, args.artefact, args.by, args.at,
+                note=args.note)
+        elif args.command == "decision-log":
+            result = service.decision_log()
+        elif args.command == "verify-decision-log":
+            result = service.verify_decision_log()
         else:  # pragma: no cover - argparse enforces the choices
             return 2
+    except BriefRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
     except NarrativeRefused as exc:
         print(json.dumps({"refused": exc.problems}, indent=2), file=sys.stderr)
         return 2

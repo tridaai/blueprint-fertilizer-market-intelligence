@@ -8,9 +8,12 @@ model calls go through the model port.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from . import alert_rules as alert_pack
+from . import brief as brief_engine
+from . import brief_rules as brief_pack
 from . import dashboard as dashboard_engine
 from . import demand as demand_engine
 from . import field as field_engine
@@ -1305,6 +1308,288 @@ class MarketService:
             raise ValueError(f"no such planning adoption: {adoption_id}")
         problems = scenario_engine.verify_adoption(self.store, adoption)
         return {"adoption_id": adoption_id, "verified": not problems,
+                "problems": problems}
+
+    # -- Round 10: weekly brief, report packs, publication -------
+    # The brief is assembled from artefacts, verified figure by
+    # figure, and only then stored; a refusal is recorded as
+    # its own artefact. Publication is a named act over an
+    # exact artefact version — the brief itself carries no
+    # published field, so the read surface folds the acts.
+
+    def _record_brief_refusal(self, week_ending, as_of, assembled_by,
+                              problems) -> dict:
+        refusal = brief_engine.build_refusal(
+            week_ending, as_of, assembled_by, problems)
+        existing = self.store.get_brief_refusal(refusal.refusal_id)
+        if existing is not None:
+            return existing
+        self.store.insert_brief_refusal(refusal.model_dump())
+        log.info("brief refusal recorded: %s", refusal.refusal_id)
+        return self.store.get_brief_refusal(refusal.refusal_id)
+
+    def weekly_brief(self, week_ending, assembled_by, as_of=None,
+                     port=None) -> dict:
+        """Assemble the brief for the week ending on a date.
+
+        The candidate is collected from the heads of record,
+        its summary drafted through the model port, and every
+        figure re-performed from its pinned artefact before
+        anything is stored. One wrong figure refuses the
+        brief wholesale: a refusal artefact is recorded with
+        its reasons and BriefRefused is raised. A clean
+        assembly for a week with a recorded refusal
+        supersedes the refusal by link. Compute-or-return: the
+        same week over the same heads returns the stored
+        brief."""
+        if not assembled_by or not assembled_by.strip():
+            raise ValueError(
+                "a brief names who assembled it — an unnamed "
+                "assembly is refused")
+        as_of = as_of or week_ending
+        model = port or self.model
+        try:
+            candidate = brief_engine.assemble_candidate(
+                self, week_ending, as_of, assembled_by, model)
+        except brief_engine.BriefRefused as refused:
+            refusal = self._record_brief_refusal(
+                week_ending, as_of, assembled_by, refused.problems)
+            raise brief_engine.BriefRefused(
+                refused.problems, refusal["refusal_id"]) from refused
+        problems = brief_engine.verify_brief(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = self._record_brief_refusal(
+                week_ending, as_of, assembled_by, problems)
+            raise brief_engine.BriefRefused(
+                problems, refusal["refusal_id"])
+        existing = self.store.get_weekly_brief(candidate.brief_id)
+        if existing is not None:
+            return self._brief_with_publication(existing)
+        self.store.insert_weekly_brief(candidate.model_dump())
+        log.info("weekly brief stored: %s", candidate.brief_id)
+        return self._brief_with_publication(
+            self.store.get_weekly_brief(candidate.brief_id))
+
+    def _brief_with_publication(self, brief: dict) -> dict:
+        brief = dict(brief)
+        brief["publication"] = brief_engine.publication_state(
+            self.store.list_publication_acts(),
+            brief_pack.KIND_BRIEF, brief["brief_id"])
+        return brief
+
+    def get_brief(self, brief_id) -> dict | None:
+        row = self.store.get_weekly_brief(brief_id)
+        return self._brief_with_publication(row) if row else None
+
+    def list_briefs(self, week_ending=None) -> list[dict]:
+        return [
+            self._brief_with_publication(b)
+            for b in self.store.list_weekly_briefs(week_ending)
+        ]
+
+    def verify_brief(self, brief_id) -> dict:
+        brief = self.store.get_weekly_brief(brief_id)
+        if brief is None:
+            raise ValueError(f"no such weekly brief: {brief_id}")
+        problems = brief_engine.verify_brief(self.store, brief)
+        return {"brief_id": brief_id, "verified": not problems,
+                "problems": problems}
+
+    def brief_html(self, brief_id) -> str | None:
+        brief = self.get_brief(brief_id)
+        if brief is None:
+            return None
+        return brief_engine.render_brief_html(brief, brief["publication"])
+
+    def list_brief_refusals(self, week_ending=None) -> list[dict]:
+        return self.store.list_brief_refusals(week_ending)
+
+    # -- report packs ---------------------------------------------
+
+    def _collect_pack_tables(self, pack_kind, pack_key, as_of):
+        if pack_kind == brief_pack.PACK_PRODUCT:
+            return brief_engine.collect_product_pack(
+                self, pack_key, as_of)
+        if pack_kind == brief_pack.PACK_REGION:
+            return brief_engine.collect_region_pack(
+                self, pack_key, as_of)
+        raise ValueError(
+            f"pack kind {pack_kind!r} is not a pack kind — the "
+            f"brief pack names {brief_pack.PACK_KINDS}")
+
+    def export_pack(self, pack_kind, pack_key, exported_by,
+                    as_of) -> dict:
+        """Export one product's or one region's figures as a
+        pack artefact: tables collected from the artefacts of
+        record, a provenance appendix, and a checksum
+        manifest over the rendered files. Compute-or-return:
+        the same pack content returns the stored artefact."""
+        if not exported_by or not exported_by.strip():
+            raise ValueError(
+                "a pack names who exported it — an unnamed "
+                "export is refused")
+        if pack_kind == brief_pack.PACK_PRODUCT \
+                and pack_key not in PRODUCTS:
+            raise ValueError(
+                f"product {pack_key!r} is not tracked — the "
+                f"tracked products are {PRODUCTS}")
+        tables, appendix = self._collect_pack_tables(
+            pack_kind, pack_key, as_of)
+        artefact = brief_engine.build_pack(
+            pack_kind, pack_key, as_of, exported_by, tables, appendix)
+        existing = self.store.get_export_pack(artefact.pack_id)
+        if existing is not None:
+            return existing
+        self.store.insert_export_pack(artefact.model_dump())
+        log.info("export pack stored: %s", artefact.pack_id)
+        return self.store.get_export_pack(artefact.pack_id)
+
+    def get_pack(self, pack_id) -> dict | None:
+        return self.store.get_export_pack(pack_id)
+
+    def list_packs(self, pack_kind=None, pack_key=None) -> list[dict]:
+        return self.store.list_export_packs(pack_kind, pack_key)
+
+    def verify_pack(self, pack_id) -> dict:
+        """Re-perform a stored pack: files against manifest,
+        tables against a fresh collection from the store at
+        the pack's as-of, identity against content."""
+        pack_row = self.store.get_export_pack(pack_id)
+        if pack_row is None:
+            raise ValueError(f"no such export pack: {pack_id}")
+        fresh_tables, _ = self._collect_pack_tables(
+            pack_row["pack_kind"], pack_row["pack_key"],
+            pack_row["as_of"])
+        problems = brief_engine.verify_pack(
+            self.store, pack_row, fresh_tables)
+        return {"pack_id": pack_id, "verified": not problems,
+                "problems": problems}
+
+    def pack_files(self, pack_id) -> dict[str, str]:
+        """The pack's rendered files as text — the bytes the
+        manifest checksums were taken over."""
+        pack_row = self.store.get_export_pack(pack_id)
+        if pack_row is None:
+            raise ValueError(f"no such export pack: {pack_id}")
+        return {
+            name: data.decode()
+            for name, data in
+            brief_engine.render_pack_files(pack_row).items()
+        }
+
+    def write_pack(self, pack_id, out_dir) -> dict:
+        """Write the pack's files into a directory; returns
+        the file names written."""
+        from pathlib import Path
+
+        pack_row = self.store.get_export_pack(pack_id)
+        if pack_row is None:
+            raise ValueError(f"no such export pack: {pack_id}")
+        target = Path(out_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        written = {}
+        for name, data in brief_engine.render_pack_files(
+                pack_row).items():
+            (target / name).write_bytes(data)
+            written[name] = str(target / name)
+        return written
+
+    def verify_pack_dir(self, pack_id, in_dir) -> dict:
+        """Verify files as they sit in a directory against
+        the pack's manifest and the store: a tampered export
+        file is detected and named."""
+        from pathlib import Path
+
+        pack_row = self.store.get_export_pack(pack_id)
+        if pack_row is None:
+            raise ValueError(f"no such export pack: {pack_id}")
+        source = Path(in_dir)
+        files = {}
+        if source.is_dir():
+            for path in sorted(source.iterdir()):
+                if path.is_file():
+                    files[path.name] = path.read_bytes()
+        problems = brief_engine.verify_pack_files(pack_row, files)
+        fresh_tables, _ = self._collect_pack_tables(
+            pack_row["pack_kind"], pack_row["pack_key"],
+            pack_row["as_of"])
+        if json.dumps(fresh_tables, sort_keys=True) != \
+                json.dumps(pack_row["tables"], sort_keys=True):
+            problems.append(
+                "the pack's tables do not re-perform from the "
+                "store at its as-of")
+        return {"pack_id": pack_id, "verified": not problems,
+                "problems": problems}
+
+    # -- publication ------------------------------------------------
+
+    def publish_artefact(self, artefact_kind, artefact_id,
+                         published_by, published_at,
+                         note=None) -> dict:
+        """Publish one artefact version by a named act. The
+        target must exist and must verify under its own
+        family's verifier at publication time — an unverified
+        artefact cannot be published. The act binds the
+        artefact's fingerprint and supersedes the family's
+        current head act by link; it edits no artefact."""
+        if not published_by or not published_by.strip():
+            raise ValueError(
+                "a publication act names its publisher — an "
+                "unnamed publication is refused")
+        if not published_at:
+            raise ValueError("a publication act names its date")
+        if artefact_kind == brief_pack.KIND_BRIEF:
+            target = self.store.get_weekly_brief(artefact_id)
+            problems = (
+                brief_engine.verify_brief(self.store, target)
+                if target is not None
+                else [f"no such weekly brief: {artefact_id}"])
+        elif artefact_kind == brief_pack.KIND_OUTLOOK:
+            target = self.store.get_outlook(artefact_id)
+            problems = (
+                demand_engine.verify_outlook(self.store, target)
+                if target is not None
+                else [f"no such season outlook: {artefact_id}"])
+        else:
+            raise ValueError(
+                f"artefact kind {artefact_kind!r} cannot be "
+                f"published — the brief pack names "
+                f"{brief_pack.PUBLICATION_KINDS}")
+        if problems:
+            raise ValueError(
+                f"{artefact_kind} {artefact_id} cannot be "
+                f"published: " + "; ".join(problems))
+        family = brief_engine.family_key_for(artefact_kind, target)
+        head = brief_engine.head_act(
+            self.store.list_publication_acts(family_key=family))
+        act = brief_engine.build_publication_act(
+            artefact_kind, target, published_by.strip(),
+            published_at, note,
+            head["act_id"] if head else None)
+        existing = self.store.get_publication_act(act.act_id)
+        if existing is not None:
+            return existing
+        self.store.insert_publication_act(act.model_dump())
+        log.info("publication act recorded: %s", act.act_id)
+        return self.store.get_publication_act(act.act_id)
+
+    def publication_state(self, artefact_kind, artefact_id) -> dict:
+        return brief_engine.publication_state(
+            self.store.list_publication_acts(),
+            artefact_kind, artefact_id)
+
+    def decision_log(self) -> list[dict]:
+        """The publication decision log, re-derived from the
+        acts alone: who published what, when, superseding
+        which version."""
+        return brief_engine.derive_decision_log(
+            self.store.list_publication_acts())
+
+    def verify_decision_log(self) -> dict:
+        acts = self.store.list_publication_acts()
+        problems = brief_engine.verify_decision_log(self.store, acts)
+        return {"acts": len(acts), "verified": not problems,
                 "problems": problems}
 
     def ready(self) -> bool:

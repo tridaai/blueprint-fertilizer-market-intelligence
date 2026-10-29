@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from .brief import BriefRefused
 from .config import Settings
 from .dashboard import DashboardRefused
 from .demand import NarrativeRefused
@@ -160,6 +161,27 @@ class AdoptionRequest(BaseModel):
     fork_id: str | None = None
     adopted_by: str
     as_of: str
+    note: str | None = None
+
+
+class BriefRequest(BaseModel):
+    week_ending: str
+    assembled_by: str
+    as_of: str | None = None
+
+
+class PackRequest(BaseModel):
+    pack_kind: str
+    pack_key: str
+    exported_by: str
+    as_of: str
+
+
+class PublicationRequest(BaseModel):
+    artefact_kind: str
+    artefact_id: str
+    published_by: str
+    published_at: str
     note: str | None = None
 
 
@@ -1038,6 +1060,108 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return service.verify_adoption(adoption_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # -- weekly brief, report packs & publication (R10) -------
+
+    @app.post("/briefs")
+    def assemble_brief(body: BriefRequest) -> dict:
+        try:
+            return service.weekly_brief(
+                body.week_ending, body.assembled_by, body.as_of)
+        except BriefRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/briefs")
+    def list_briefs(week_ending: str | None = None) -> list[dict]:
+        return service.list_briefs(week_ending)
+
+    @app.get("/briefs/{brief_id}")
+    def get_brief(brief_id: str) -> dict:
+        brief = service.get_brief(brief_id)
+        if brief is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such weekly brief: {brief_id}")
+        return brief
+
+    @app.get("/briefs/{brief_id}/verify")
+    def verify_brief(brief_id: str) -> dict:
+        try:
+            return service.verify_brief(brief_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/briefs/{brief_id}/html")
+    def brief_html(brief_id: str) -> HTMLResponse:
+        page = service.brief_html(brief_id)
+        if page is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such weekly brief: {brief_id}")
+        return HTMLResponse(page)
+
+    @app.get("/brief-refusals")
+    def list_brief_refusals(
+        week_ending: str | None = None,
+    ) -> list[dict]:
+        return service.list_brief_refusals(week_ending)
+
+    @app.post("/packs")
+    def export_pack(body: PackRequest) -> dict:
+        try:
+            return service.export_pack(
+                body.pack_kind, body.pack_key, body.exported_by,
+                body.as_of)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/packs")
+    def list_packs(
+        pack_kind: str | None = None, pack_key: str | None = None,
+    ) -> list[dict]:
+        return service.list_packs(pack_kind, pack_key)
+
+    @app.get("/packs/{pack_id}")
+    def get_pack(pack_id: str) -> dict:
+        pack_row = service.get_pack(pack_id)
+        if pack_row is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such export pack: {pack_id}")
+        return pack_row
+
+    @app.get("/packs/{pack_id}/verify")
+    def verify_pack(pack_id: str) -> dict:
+        try:
+            return service.verify_pack(pack_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/packs/{pack_id}/files")
+    def pack_files(pack_id: str) -> dict:
+        try:
+            return service.pack_files(pack_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/publications")
+    def publish_artefact(body: PublicationRequest) -> dict:
+        try:
+            return service.publish_artefact(
+                body.artefact_kind, body.artefact_id,
+                body.published_by, body.published_at, note=body.note)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/publications")
+    def decision_log() -> list[dict]:
+        return service.decision_log()
+
+    @app.get("/publications/verify")
+    def verify_decision_log() -> dict:
+        return service.verify_decision_log()
 
     return app
 
