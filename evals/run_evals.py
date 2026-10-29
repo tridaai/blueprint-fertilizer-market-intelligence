@@ -280,6 +280,41 @@ Round 10 adds the brief & publication counters (all zero-tolerance):
                                    after export that the
                                    manifest check did not name
 
+Round 11 adds the data-plane counters (all zero-tolerance):
+  - ingest_replay_duplicates ..... a connector replay that
+                                   landed a row twice, at
+                                   batch level or row level
+  - ingest_provenance_accepted ... a row without source or
+                                   as_of that was stored
+                                   instead of refused at the
+                                   port, or any provenance
+                                   gap in the fact tables
+  - ingest_reconciliation_errors . a batch report whose
+                                   counts do not reconcile,
+                                   or that the batch verifier
+                                   cannot re-perform
+  - quarantine_reason_mismatches . planted bad rows held
+                                   under reasons other than
+                                   the exact named set
+  - quarantined_rows_consumed .... a quarantined row that
+                                   reached a fact table, or
+                                   any fact count that moved
+                                   under a dirty batch
+  - correction_chain_errors ...... a correction chain that
+                                   does not fold to its head,
+                                   a stored fact rewritten by
+                                   a correction, or tampering
+                                   the chain verifier missed
+  - actuals_overwriting_estimates  a season-close actual
+                                   that changed an estimate,
+                                   landed outside its own
+                                   fact class, or went missing
+                                   from the actuals report
+  - actuals_unmatched_unreported . an actual whose natural
+                                   key has no struck estimate
+                                   that the report failed to
+                                   name as unmatched
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -1710,7 +1745,182 @@ def main() -> int:
     if service.verify_pack(pack10["pack_id"])["verified"]:
         counters["pack_figure_mismatch"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10 evals — fertilizer market intelligence")
+    # --- Round 11: the production data plane -----------------
+    # Connector loads reconcile exactly and a replay lands
+    # nothing twice; a provenanceless row is refused at the
+    # port; planted bad rows quarantine under the exact
+    # named reasons with no fact count moving; corrections
+    # fold over an unrewritten stored fact and the chain
+    # verifier catches tampering; actuals land in their own
+    # class, leave estimates untouched, and report their
+    # unmatched rows instead of dropping them.
+    import json as _json11
+    import sqlite3 as _sqlite11
+
+    counters.setdefault("ingest_replay_duplicates", 0)
+    counters.setdefault("ingest_provenance_accepted", 0)
+    counters.setdefault("ingest_reconciliation_errors", 0)
+    counters.setdefault("quarantine_reason_mismatches", 0)
+    counters.setdefault("quarantined_rows_consumed", 0)
+    counters.setdefault("correction_chain_errors", 0)
+    counters.setdefault("actuals_overwriting_estimates", 0)
+    counters.setdefault("actuals_unmatched_unreported", 0)
+
+    def _price11(item, month, price, **over):
+        row = {"series_kind": "product", "item": item,
+               "month": month, "price": price, "unit": "INR/tonne",
+               "source": "intl_price_feed", "as_of": "2026-05-05"}
+        row.update(over)
+        return row
+
+    good11 = [_price11("DAP", "2026-05", 27050.0),
+              _price11("UREA", "2026-05", 5910.0)]
+    prices_before11 = len(store.price_points())
+    batch11 = service.load_connector_batch(
+        "intl_price_feed", good11, "eval desk", "2026-05-06")
+    if batch11["received"] != 2 or batch11["inserted"] != 2:
+        counters["ingest_reconciliation_errors"] += 1
+    if batch11["received"] != (batch11["inserted"]
+                               + batch11["duplicates"]
+                               + batch11["quarantined"]
+                               + batch11["refused"]):
+        counters["ingest_reconciliation_errors"] += 1
+    if len(store.price_points()) != prices_before11 + 2:
+        counters["ingest_reconciliation_errors"] += 1
+    if not service.verify_ingest_batch(batch11["batch_id"])["verified"]:
+        counters["ingest_reconciliation_errors"] += 1
+    replay11 = service.load_connector_batch(
+        "intl_price_feed", good11, "eval desk", "2026-05-06")
+    if replay11["batch_id"] != batch11["batch_id"]:
+        counters["ingest_replay_duplicates"] += 1
+    replay11b = service.load_connector_batch(
+        "intl_price_feed", good11, "eval desk", "2026-05-07")
+    if replay11b["inserted"] != 0 or replay11b["duplicates"] != 2:
+        counters["ingest_replay_duplicates"] += 1
+    if len(store.price_points()) != prices_before11 + 2:
+        counters["ingest_replay_duplicates"] += 1
+
+    noprov11 = {"series_kind": "product", "item": "MOP",
+                "month": "2026-05", "price": 24100.0,
+                "unit": "INR/tonne", "source": "intl_price_feed"}
+    refused11 = service.load_connector_batch(
+        "intl_price_feed", [noprov11], "eval desk", "2026-05-06")
+    if refused11["refused"] != 1 or refused11["inserted"] != 0:
+        counters["ingest_provenance_accepted"] += 1
+    if any(p["item"] == "MOP" and p["month"] == "2026-05"
+           for p in store.price_points()):
+        counters["ingest_provenance_accepted"] += 1
+    if store.provenance_gaps() != 0:
+        counters["ingest_provenance_accepted"] += 1
+
+    counts_before11 = store.fact_counts()
+    dirty11 = [
+        _price11("DAP", "2026-05", 99999.0, as_of="2026-05-06"),
+        _price11("POTASH_X", "2026-05", 1200.0, as_of="2026-05-06"),
+        _price11("MOP", "2026-05", -10.0, as_of="2026-05-06"),
+        _price11("MOP", "2026-06", 24100.0, source="rival_feed",
+                 as_of="2026-05-06"),
+        _price11("MOP", "2026-07", 24100.0, as_of="2026-04-20"),
+    ]
+    dirty_batch11 = service.load_connector_batch(
+        "intl_price_feed", dirty11, "eval desk", "2026-05-07")
+    expected_reasons11 = sorted([
+        "conflicts_with_stored", "unknown_product",
+        "non_positive_price", "source_mismatch",
+        "stale_beyond_freshness"])
+    got_reasons11 = sorted(
+        h["reason"] for h in dirty_batch11["quarantine"])
+    if got_reasons11 != expected_reasons11:
+        counters["quarantine_reason_mismatches"] += 1
+    if dirty_batch11["inserted"] != 0:
+        counters["quarantined_rows_consumed"] += 1
+    if store.fact_counts() != counts_before11:
+        counters["quarantined_rows_consumed"] += 1
+
+    key11 = {"series_kind": "product", "item": "DAP",
+             "month": "2026-05"}
+    row11 = dict(key11, price=27125.5, unit="INR/tonne",
+                 source="intl_price_feed", as_of="2026-05-08")
+    corr11 = service.submit_correction(
+        "price_points", row11, None, "eval desk")
+    row11b = dict(row11, price=27130.0, as_of="2026-05-09")
+    service.submit_correction(
+        "price_points", row11b, corr11["correction_id"], "eval desk")
+    chain11 = service.verify_correction_chain("price_points", key11)
+    if not chain11["verified"]:
+        counters["correction_chain_errors"] += 1
+    if service.effective_fact("price_points", key11)["price"] != 27130.0:
+        counters["correction_chain_errors"] += 1
+    stored11 = next(p for p in store.price_points("product", "DAP")
+                    if p["month"] == "2026-05")
+    if stored11["price"] != 27050.0:
+        counters["correction_chain_errors"] += 1
+    raw11 = _sqlite11.connect(settings.sqlite_path)
+    prow11 = raw11.execute(
+        "SELECT payload FROM fact_corrections "
+        "WHERE correction_id = ?",
+        (corr11["correction_id"],)).fetchone()
+    payload11 = _json11.loads(prow11[0])
+    payload11["row"]["price"] = 1.0
+    raw11.execute(
+        "UPDATE fact_corrections SET payload = ? "
+        "WHERE correction_id = ?",
+        (_json11.dumps(payload11), corr11["correction_id"]))
+    raw11.commit()
+    raw11.close()
+    if service.verify_correction_chain("price_points", key11)["verified"]:
+        counters["correction_chain_errors"] += 1
+
+    service.estimate_demand("DST-GUN", "UREA", "2025-26", "rabi",
+                            "2026-04-15")
+    estimates_before11 = {
+        e["estimate_id"]: e["fact_fingerprint"]
+        for e in store.list_estimates()}
+
+    def _actual11(district, product, kind, qty):
+        return {"district_id": district, "crop_year": "2025-26",
+                "season": "rabi", "product": product,
+                "actual_kind": kind, "quantity_tonnes": qty,
+                "source": "state_dispatch_returns",
+                "as_of": "2026-04-15"}
+
+    actuals11 = [_actual11("DST-GUN", "UREA", "consumption", 45210.5),
+                 _actual11("DST-GUN", "MOP", "dispatch", 12340.0)]
+    abatch11 = service.load_connector_batch(
+        "state_dispatch_returns", actuals11, "eval desk", "2026-04-20")
+    if abatch11["inserted"] != 2:
+        counters["actuals_overwriting_estimates"] += 1
+    if {e["estimate_id"]: e["fact_fingerprint"]
+            for e in store.list_estimates()} != estimates_before11:
+        counters["actuals_overwriting_estimates"] += 1
+    if store.fact_counts()["season_actuals"] != 2:
+        counters["actuals_overwriting_estimates"] += 1
+    report11 = service.actuals_report("2025-26", "rabi")
+    if report11["actual_count"] != 2:
+        counters["actuals_overwriting_estimates"] += 1
+    # Independent join: the head-estimate key set for the
+    # season, derived here from the estimate rows alone.
+    season_estimates11 = store.list_estimates(
+        crop_year="2025-26", season="rabi")
+    superseded11 = {e["supersedes"] for e in season_estimates11
+                    if e.get("supersedes")}
+    head_keys11 = {(e["district_id"], e["product"])
+                   for e in season_estimates11
+                   if e["estimate_id"] not in superseded11}
+    for row in report11["rows"]:
+        should_match = (row["district_id"], row["product"]) in head_keys11
+        if row["matched_estimate"] != should_match:
+            counters["actuals_unmatched_unreported"] += 1
+        if not should_match:
+            label11 = (f"{row['district_id']}/{row['crop_year']}/"
+                       f"{row['season']}/{row['product']}/"
+                       f"{row['actual_kind']}")
+            if label11 not in report11["unmatched"]:
+                counters["actuals_unmatched_unreported"] += 1
+    if ("DST-GUN", "UREA") not in head_keys11:
+        counters["actuals_unmatched_unreported"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]

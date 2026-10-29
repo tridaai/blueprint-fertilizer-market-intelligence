@@ -653,6 +653,137 @@ def main() -> int:
     for problem in caught["problems"]:
         print(f"    tamper: {problem}")
 
+    print("\n--- Round 11: the production data plane ---")
+
+    registry = service.ingest_sources()
+    print(f"\nThe source registry admits {len(registry)} feeds — "
+          f"each with a fact class, a cadence, an owner and a "
+          f"freshness rule:")
+    for source in registry:
+        print(f"  {source['source_id']:<26} {source['fact_class']:<18} "
+              f"{source['cadence']:<12} owner: {source['owner']}, "
+              f"fresh within {source['freshness_days']} days")
+
+    feed_rows = [
+        {"series_kind": "product", "item": "DAP", "month": "2026-05",
+         "price": 27050.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-05"},
+        {"series_kind": "product", "item": "UREA", "month": "2026-05",
+         "price": 5910.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-05"},
+        {"series_kind": "feedstock", "item": "NATURAL_GAS",
+         "month": "2026-05", "price": 3.41, "unit": "USD/MMBtu",
+         "source": "intl_price_feed", "as_of": "2026-05-05"},
+    ]
+    batch = service.load_connector_batch(
+        "intl_price_feed", feed_rows, "demo desk", "2026-05-06")
+    prices_before = len(service.store.price_points())
+    print(f"\nA price-feed batch lands ({batch['batch_id']}): "
+          f"{batch['received']} received, {batch['inserted']} "
+          f"inserted, {batch['duplicates']} duplicates, "
+          f"{batch['quarantined']} quarantined, {batch['refused']} "
+          f"refused — the counts reconcile, and the batch verifies: "
+          f"{service.verify_ingest_batch(batch['batch_id'])['verified']}.")
+    replay = service.load_connector_batch(
+        "intl_price_feed", feed_rows, "demo desk", "2026-05-06")
+    print(f"  replaying the identical batch returns the stored "
+          f"report ({replay['batch_id']}) and lands nothing: "
+          f"price points still {len(service.store.price_points())} "
+          f"of {prices_before}.")
+
+    dirty_rows = feed_rows + [
+        {"series_kind": "product", "item": "DAP", "month": "2026-05",
+         "price": 99999.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-06"},
+        {"series_kind": "product", "item": "POTASH_X",
+         "month": "2026-05", "price": 1200.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-06"},
+        {"series_kind": "product", "item": "MOP", "month": "2026-05",
+         "price": -10.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-06"},
+        {"series_kind": "product", "item": "MOP", "month": "2026-05",
+         "price": 24100.0, "unit": "INR/tonne",
+         "source": "intl_price_feed"},
+    ]
+    dirty = service.load_connector_batch(
+        "intl_price_feed", dirty_rows, "demo desk", "2026-05-07")
+    print(f"\nThe next day's batch repeats the three good rows and "
+          f"carries four bad ones ({dirty['batch_id']}): "
+          f"{dirty['duplicates']} duplicates, "
+          f"{dirty['quarantined']} quarantined, {dirty['refused']} "
+          f"refused at the port. The held rows, with their reasons:")
+    for held in service.list_quarantine(batch_id=dirty["batch_id"]):
+        print(f"  {held['quarantine_id']}: {held['reason']:<24} "
+              f"{held['natural_key']} — {held['detail']}")
+    for refusal in dirty["refusals"]:
+        print(f"  row {refusal['row_index']}: refused at the port — "
+              f"{refusal['reason']} (missing "
+              f"{', '.join(refusal['missing'])})")
+    print(f"  no bad row reached the fact table: price points "
+          f"still {len(service.store.price_points())}.")
+
+    first = service.submit_correction(
+        "price_points",
+        {"series_kind": "product", "item": "DAP", "month": "2026-05",
+         "price": 27125.5, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-08"},
+        None, "demo desk")
+    second = service.submit_correction(
+        "price_points",
+        {"series_kind": "product", "item": "DAP", "month": "2026-05",
+         "price": 27130.0, "unit": "INR/tonne",
+         "source": "intl_price_feed", "as_of": "2026-05-09"},
+        first["correction_id"], "demo desk")
+    dap_key = {"series_kind": "product", "item": "DAP",
+               "month": "2026-05"}
+    stored_dap = next(
+        p for p in service.store.price_points("product", "DAP")
+        if p["month"] == "2026-05")
+    effective = service.effective_fact("price_points", dap_key)
+    chain = service.verify_correction_chain("price_points", dap_key)
+    print(f"\nThe feed corrects its DAP print twice "
+          f"({first['correction_id']} then "
+          f"{second['correction_id']}). The stored fact is never "
+          f"rewritten — it still reads {stored_dap['price']} — "
+          f"while the effective row folds the chain to "
+          f"{effective['price']}. The chain re-performs: "
+          f"{chain['verified']}.")
+
+    service.estimate_demand("DST-GUN", "UREA", "2025-26", "rabi",
+                            "2026-04-15")
+    actual_rows = [
+        {"district_id": "DST-GUN", "crop_year": "2025-26",
+         "season": "rabi", "product": "UREA",
+         "actual_kind": "consumption", "quantity_tonnes": 45210.5,
+         "source": "state_dispatch_returns", "as_of": "2026-04-15"},
+    ]
+    actuals_batch = service.load_connector_batch(
+        "state_dispatch_returns", actual_rows, "demo desk",
+        "2026-04-20")
+    report = service.actuals_report("2025-26", "rabi")
+    print(f"\nSeason-close actuals land as their own fact class "
+          f"({actuals_batch['batch_id']}: "
+          f"{actuals_batch['inserted']} inserted) — the estimate "
+          f"tables are untouched. The actuals report joins by "
+          f"natural key: {report['matched_count']} matched against "
+          f"a struck estimate.")
+    prior_rows = [
+        {"district_id": "DST-GUN", "crop_year": "2023-24",
+         "season": "rabi", "product": "MOP",
+         "actual_kind": "dispatch", "quantity_tonnes": 12340.0,
+         "source": "state_dispatch_returns", "as_of": "2025-04-15"},
+    ]
+    service.load_connector_batch(
+        "state_dispatch_returns", prior_rows, "demo desk",
+        "2025-05-06")
+    prior = service.actuals_report("2023-24", "rabi")
+    print(f"  a late return for a season before the tracked "
+          f"window — no estimate was ever struck for it — is "
+          f"reported, not dropped: {prior['unmatched_count']} "
+          f"unmatched:")
+    for label in prior["unmatched"]:
+        print(f"  unmatched: {label}")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
