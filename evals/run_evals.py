@@ -364,6 +364,35 @@ Round 14 adds the rollup, territory pack & readiness counters
                                    verdict that disagrees with its
                                    lines, or a publication that
                                    fails to flip the outlook line
+
+Round 15 adds the roles, approvals & collaboration counters
+(all zero-tolerance):
+  - access_scope_errors .......... a scoped district list that
+                                   names a district outside the
+                                   reader's region, an out-of-scope
+                                   competitor read that returns an
+                                   artefact instead of absence, or
+                                   an in-scope read that fails
+  - access_log_errors ............ an access entry that does not
+                                   re-decide from the pack, an
+                                   export entry set that does not
+                                   reconcile one-to-one with the
+                                   export packs, or a tampered
+                                   entry the verifier does not name
+  - annotation_flag_errors ....... an annotation whose superseded
+                                   flag disagrees with the family
+                                   head folded here, or a pin that
+                                   does not match its target
+  - followup_fold_errors ......... a follow-up whose folded state
+                                   or owner disagrees with its acts,
+                                   or an act accepted against a
+                                   terminal task
+  - review_queue_errors .......... a queue whose membership
+                                   disagrees with the publication
+                                   fold taken here, a queue that
+                                   does not verify, or a publication
+                                   from the queue that does not
+                                   bind the reviewed fingerprint
 """
 
 from __future__ import annotations
@@ -2764,7 +2793,162 @@ def main() -> int:
             "verified"]:
         counters["readiness_blocking_errors"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14 evals — fertilizer market intelligence")
+    # -- Round 15: role scopes, the access audit log,
+    # annotations and follow-ups, and the publication
+    # review queue. The scope verdicts are re-derived
+    # from the district register; the queue's membership
+    # is re-folded here from the publication acts alone.
+    counters.setdefault("access_scope_errors", 0)
+    counters.setdefault("access_log_errors", 0)
+    counters.setdefault("annotation_flag_errors", 0)
+    counters.setdefault("followup_fold_errors", 0)
+    counters.setdefault("review_queue_errors", 0)
+
+    asof15 = "2026-04-24"
+    districts15 = store.list_districts()
+    north15 = [d for d in districts15 if d["region"] == "north"]
+    scoped15 = service.scoped_districts("D. Verma")
+    if [d["district_id"] for d in scoped15] != \
+            [d["district_id"] for d in north15]:
+        counters["access_scope_errors"] += 1
+    if {d["region"] for d in scoped15} != {"north"}:
+        counters["access_scope_errors"] += 1
+
+    service.build_competitor_observations()
+    observations15 = store.list_competitor_observations()
+    south15 = next(o for o in observations15
+                   if o["region"] == "south")
+    north_obs15 = next(o for o in observations15
+                       if o["region"] == "north")
+    if service.scoped_competitor_observation(
+            "P. Nair", south15["observation_id"], asof15) is None:
+        counters["access_scope_errors"] += 1
+    if service.scoped_competitor_observation(
+            "P. Nair", north_obs15["observation_id"],
+            asof15) is not None:
+        counters["access_scope_errors"] += 1
+    if service.scoped_competitor_observation(
+            "Guest Viewer", south15["observation_id"],
+            asof15) is not None:
+        counters["access_scope_errors"] += 1
+    listed15 = service.scoped_competitor_observations(
+        "P. Nair", asof15)
+    if not listed15 or any(o["region"] != "south"
+                           for o in listed15):
+        counters["access_scope_errors"] += 1
+
+    audit15 = service.verify_access_log()
+    if not audit15["verified"]:
+        counters["access_log_errors"] += 1
+    export_entries15 = [e for e in service.access_log()
+                        if e["surface"] == "export_pack"]
+    if {e["target"] for e in export_entries15} != \
+            {p["pack_id"] for p in store.list_export_packs()}:
+        counters["access_log_errors"] += 1
+    if len(export_entries15) != len(store.list_export_packs()):
+        counters["access_log_errors"] += 1
+
+    gaps15 = store.list_gaps()
+    superseded15 = {g["supersedes"] for g in gaps15
+                    if g.get("supersedes")}
+    stale15 = next((g for g in gaps15
+                    if g["gap_id"] in superseded15), None)
+    head_gap15 = service.get_gap("MOP", "2025-26", "kharif")
+    if stale15 is not None:
+        pinned15 = service.annotate(
+            "supply_gap", stale15["gap_id"], "eval desk",
+            asof15, "Eval pin on a superseded gap.")
+        if not pinned15["pinned_to_superseded"] \
+                or not pinned15["target_matches_pin"]:
+            counters["annotation_flag_errors"] += 1
+    head_pin15 = service.annotate(
+        "supply_gap", head_gap15["gap_id"], "eval desk",
+        asof15, "Eval pin on the head gap.")
+    if head_pin15["pinned_to_superseded"] \
+            or not head_pin15["target_matches_pin"]:
+        counters["annotation_flag_errors"] += 1
+    if not service.verify_notes()["verified"]:
+        counters["annotation_flag_errors"] += 1
+
+    task15 = service.create_followup(
+        "supply_gap", head_gap15["gap_id"], "K. Bhatt",
+        "eval desk", asof15, "Eval follow-up.",
+        due="2026-05-01")
+    service.record_followup_act(
+        task15["task_id"], "assign", "K. Bhatt", "2026-04-25",
+        assignee="S. Iyer")
+    service.record_followup_act(
+        task15["task_id"], "complete", "S. Iyer", "2026-04-26")
+    view15 = service.get_followup(task15["task_id"])
+    if view15["state"] != "completed" \
+            or view15["owner"] != "S. Iyer":
+        counters["followup_fold_errors"] += 1
+    try:
+        service.record_followup_act(
+            task15["task_id"], "assign", "S. Iyer",
+            "2026-04-27", assignee="K. Bhatt")
+        counters["followup_fold_errors"] += 1
+    except Exception:
+        pass
+    if not service.verify_notes()["verified"]:
+        counters["followup_fold_errors"] += 1
+
+    queue15 = service.publication_review_queue(
+        "eval desk", asof15)
+    acts15 = store.list_publication_acts()
+    pending15 = set()
+    for outlook15 in store.list_outlooks():
+        if not any(a["artefact_kind"] == "season_outlook"
+                   and a["artefact_id"] == outlook15["outlook_id"]
+                   and a["published_at"] <= asof15
+                   for a in acts15):
+            pending15.add(outlook15["outlook_id"])
+    for brief15 in store.list_weekly_briefs():
+        if not any(a["artefact_kind"] == "weekly_brief"
+                   and a["artefact_id"] == brief15["brief_id"]
+                   and a["published_at"] <= asof15
+                   for a in acts15):
+            pending15.add(brief15["brief_id"])
+    if {i["artefact_id"] for i in queue15["items"]} != pending15:
+        counters["review_queue_errors"] += 1
+    if not service.verify_review_queue(queue15["queue_id"])[
+            "verified"]:
+        counters["review_queue_errors"] += 1
+    outlook_items15 = [i for i in queue15["items"]
+                       if i["artefact_kind"] == "season_outlook"]
+    if outlook_items15:
+        item15 = outlook_items15[0]
+        act15 = service.publish_artefact(
+            "season_outlook", item15["artefact_id"],
+            "eval desk", "2026-04-25",
+            note="Published from the eval review queue.")
+        if act15["artefact_fingerprint"] != \
+                item15["reviewed_fingerprint"]:
+            counters["review_queue_errors"] += 1
+        if not service.verify_decision_log()["verified"]:
+            counters["review_queue_errors"] += 1
+
+    # Tamper, last: rewrite one access entry's decision
+    # in the raw store — the verifier must name it.
+    import sqlite3 as _sqlite3
+    _conn = _sqlite3.connect(settings.sqlite_path)
+    _row = _conn.execute(
+        "SELECT entry_id, payload FROM access_entries "
+        "ORDER BY at, entry_id LIMIT 1").fetchone()
+    if _row is not None:
+        _payload = json.loads(_row[1])
+        _payload["decision"] = "tampered"
+        _conn.execute(
+            "UPDATE access_entries SET payload = ? "
+            "WHERE entry_id = ?",
+            (json.dumps(_payload), _row[0]))
+        _conn.commit()
+        _problems = service.verify_access_log()["problems"]
+        if not any(_row[0] in p for p in _problems):
+            counters["access_log_errors"] += 1
+    _conn.close()
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
