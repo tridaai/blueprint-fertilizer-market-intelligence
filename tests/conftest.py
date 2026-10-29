@@ -45,6 +45,10 @@ def settings(tmp_path):
 
         schema = f"t_{uuid.uuid4().hex[:16]}"
         admin = psycopg.connect(_PG_BASE_URL, autocommit=True)
+        # A blocked DROP must fail loudly, never hang the
+        # suite: a store connection left open by a failed
+        # boot holds locks on its schema's tables.
+        admin.execute("SET lock_timeout = '20s'")
         admin.execute(f'CREATE SCHEMA "{schema}"')
         try:
             yield _settings(_schema_url(_PG_BASE_URL, schema), tmp_path)

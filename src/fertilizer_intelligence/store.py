@@ -70,7 +70,12 @@ class MarketStore:
     def _insert_many(self, table: str, columns: list[str], rows: list[tuple]) -> int:
         placeholders = ", ".join([self._ph] * len(columns))
         sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
-        self._conn.executemany(sql, rows)
+        # Through a cursor, not the connection: psycopg3
+        # connections have no executemany (sqlite3's do, which
+        # is how the Postgres profile hid this until R11 ran
+        # the suite against it).
+        cur = self._conn.cursor()
+        cur.executemany(sql, rows)
         self._conn.commit()
         return len(rows)
 
@@ -275,7 +280,7 @@ class MarketStore:
                 estimate["as_of"], estimate["supersedes"],
             ),
         )
-        self._conn.executemany(
+        self._conn.cursor().executemany(
             f"INSERT INTO demand_contributions (estimate_id, line_no, driver, status, "
             f"factor, delta_tonnes, value_after_tonnes, inputs) "
             f"VALUES ({', '.join([self._ph] * 8)})",
