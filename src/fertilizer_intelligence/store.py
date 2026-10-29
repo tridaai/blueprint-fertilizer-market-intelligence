@@ -1173,6 +1173,182 @@ class MarketStore:
         )
         return [self._planning_adoption_row(row) for row in rows]
 
+    # -- Round 10: weekly briefs, refusals, packs, publication acts --
+    # Briefs are stored only after their figures verify;
+    # refusals are the record of the assemblies that did
+    # not. Packs are export artefacts. Publication acts are
+    # insert-only; an artefact's publication state is the
+    # fold of the acts that name it, never a column here.
+    # All insert-only, the full artefact as a JSON payload.
+
+    def insert_weekly_brief(self, brief: dict) -> None:
+        self._insert_many(
+            "weekly_briefs",
+            ["brief_id", "fingerprint", "week_start", "week_ending",
+             "as_of", "assembled_by", "rules_version", "payload"],
+            [(
+                brief["brief_id"], brief["fingerprint"],
+                brief["week_start"], brief["week_ending"],
+                brief["as_of"], brief["assembled_by"],
+                brief["rules_version"], json.dumps(brief),
+            )],
+        )
+
+    def _weekly_brief_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_weekly_brief(self, brief_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM weekly_briefs WHERE brief_id = {self._ph}",
+            (brief_id,),
+        )
+        return self._weekly_brief_row(rows[0]) if rows else None
+
+    def weekly_brief_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM weekly_briefs WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._weekly_brief_row(rows[0]) if rows else None
+
+    def list_weekly_briefs(self, week_ending=None) -> list[dict]:
+        sql, params = "SELECT * FROM weekly_briefs WHERE 1=1", []
+        if week_ending is not None:
+            sql += f" AND week_ending = {self._ph}"
+            params.append(week_ending)
+        rows = self._rows(sql + " ORDER BY week_ending, brief_id",
+                          tuple(params))
+        return [self._weekly_brief_row(row) for row in rows]
+
+    def insert_brief_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "brief_refusals",
+            ["refusal_id", "fingerprint", "week_start", "week_ending",
+             "as_of", "assembled_by", "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["week_start"], refusal["week_ending"],
+                refusal["as_of"], refusal["assembled_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _brief_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_brief_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM brief_refusals WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._brief_refusal_row(rows[0]) if rows else None
+
+    def brief_refusal_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM brief_refusals WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._brief_refusal_row(rows[0]) if rows else None
+
+    def list_brief_refusals(self, week_ending=None) -> list[dict]:
+        sql, params = "SELECT * FROM brief_refusals WHERE 1=1", []
+        if week_ending is not None:
+            sql += f" AND week_ending = {self._ph}"
+            params.append(week_ending)
+        rows = self._rows(sql + " ORDER BY week_ending, refusal_id",
+                          tuple(params))
+        return [self._brief_refusal_row(row) for row in rows]
+
+    def insert_export_pack(self, pack_row: dict) -> None:
+        self._insert_many(
+            "export_packs",
+            ["pack_id", "fingerprint", "pack_kind", "pack_key",
+             "as_of", "exported_by", "rules_version", "payload"],
+            [(
+                pack_row["pack_id"], pack_row["fingerprint"],
+                pack_row["pack_kind"], pack_row["pack_key"],
+                pack_row["as_of"], pack_row["exported_by"],
+                pack_row["rules_version"], json.dumps(pack_row),
+            )],
+        )
+
+    def _export_pack_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_export_pack(self, pack_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM export_packs WHERE pack_id = {self._ph}",
+            (pack_id,),
+        )
+        return self._export_pack_row(rows[0]) if rows else None
+
+    def export_pack_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM export_packs WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._export_pack_row(rows[0]) if rows else None
+
+    def list_export_packs(self, pack_kind=None, pack_key=None) -> list[dict]:
+        sql, params = "SELECT * FROM export_packs WHERE 1=1", []
+        for column, value in (("pack_kind", pack_kind),
+                              ("pack_key", pack_key)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY pack_kind, pack_key, pack_id",
+                          tuple(params))
+        return [self._export_pack_row(row) for row in rows]
+
+    def insert_publication_act(self, act: dict) -> None:
+        self._insert_many(
+            "publication_acts",
+            ["act_id", "fingerprint", "artefact_kind", "artefact_id",
+             "family_key", "published_by", "published_at", "supersedes",
+             "payload"],
+            [(
+                act["act_id"], act["fingerprint"],
+                act["artefact_kind"], act["artefact_id"],
+                act["family_key"], act["published_by"],
+                act["published_at"], act["supersedes"],
+                json.dumps(act),
+            )],
+        )
+
+    def _publication_act_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_publication_act(self, act_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM publication_acts WHERE act_id = {self._ph}",
+            (act_id,),
+        )
+        return self._publication_act_row(rows[0]) if rows else None
+
+    def publication_act_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM publication_acts "
+            f"WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._publication_act_row(rows[0]) if rows else None
+
+    def list_publication_acts(self, family_key=None,
+                              artefact_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM publication_acts WHERE 1=1", []
+        for column, value in (("family_key", family_key),
+                              ("artefact_id", artefact_id)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY published_at, act_id", tuple(params))
+        return [self._publication_act_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
