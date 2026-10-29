@@ -31,6 +31,7 @@ _FACT_TABLES = [
     "competitor_points",
     "policy_events",
     "field_reports",
+    "season_actuals",
 ]
 
 
@@ -1348,6 +1349,168 @@ class MarketStore:
         rows = self._rows(
             sql + " ORDER BY published_at, act_id", tuple(params))
         return [self._publication_act_row(row) for row in rows]
+
+    # -- Round 11: the production data plane ------------------
+    # Connector batches, quarantine records and corrections
+    # are insert-only artefacts carrying their full record as
+    # a payload. Season actuals are facts — a distinct class
+    # with provenance at the row level — landed through the
+    # same port as every other fact.
+
+    def insert_season_actuals(self, facts: list[models.SeasonActual]) -> int:
+        return self._insert_many(
+            "season_actuals",
+            ["district_id", "crop_year", "season", "product", "actual_kind",
+             "quantity_tonnes", "source", "as_of"],
+            [(f.district_id, f.crop_year, f.season, f.product,
+              f.actual_kind, f.quantity_tonnes, f.source, f.as_of)
+             for f in facts],
+        )
+
+    def season_actuals(self, district_id=None, crop_year=None, season=None,
+                       product=None) -> list[dict]:
+        sql, params = "SELECT * FROM season_actuals WHERE 1=1", []
+        for column, value in (("district_id", district_id),
+                              ("crop_year", crop_year), ("season", season),
+                              ("product", product)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        return self._rows(
+            sql + " ORDER BY district_id, crop_year, season, product, "
+            "actual_kind", tuple(params))
+
+    def insert_ingest_batch(self, batch: dict) -> None:
+        self._insert_many(
+            "ingest_batches",
+            ["batch_id", "fingerprint", "source_id", "fact_class",
+             "loaded_by", "load_date", "received", "inserted",
+             "duplicates", "quarantined", "refused", "rules_version",
+             "payload"],
+            [(
+                batch["batch_id"], batch["fingerprint"],
+                batch["source_id"], batch["fact_class"],
+                batch["loaded_by"], batch["load_date"],
+                batch["received"], batch["inserted"],
+                batch["duplicates"], batch["quarantined"],
+                batch["refused"], batch["rules_version"],
+                json.dumps(batch),
+            )],
+        )
+
+    def _ingest_batch_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_ingest_batch(self, batch_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM ingest_batches WHERE batch_id = {self._ph}",
+            (batch_id,),
+        )
+        return self._ingest_batch_row(rows[0]) if rows else None
+
+    def ingest_batch_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM ingest_batches "
+            f"WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._ingest_batch_row(rows[0]) if rows else None
+
+    def list_ingest_batches(self, source_id=None, fact_class=None) -> list[dict]:
+        sql, params = "SELECT * FROM ingest_batches WHERE 1=1", []
+        for column, value in (("source_id", source_id),
+                              ("fact_class", fact_class)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY load_date, batch_id",
+                          tuple(params))
+        return [self._ingest_batch_row(row) for row in rows]
+
+    def insert_quarantine_record(self, record: dict) -> None:
+        self._insert_many(
+            "quarantine_records",
+            ["quarantine_id", "batch_id", "source_id", "fact_class",
+             "reason", "natural_key", "as_of", "payload"],
+            [(
+                record["quarantine_id"], record["batch_id"],
+                record["source_id"], record["fact_class"],
+                record["reason"], record["natural_key"],
+                record["as_of"], json.dumps(record),
+            )],
+        )
+
+    def _quarantine_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_quarantine_record(self, quarantine_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM quarantine_records "
+            f"WHERE quarantine_id = {self._ph}",
+            (quarantine_id,),
+        )
+        return self._quarantine_row(rows[0]) if rows else None
+
+    def list_quarantine_records(self, batch_id=None, reason=None,
+                                fact_class=None) -> list[dict]:
+        sql, params = "SELECT * FROM quarantine_records WHERE 1=1", []
+        for column, value in (("batch_id", batch_id), ("reason", reason),
+                              ("fact_class", fact_class)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY batch_id, quarantine_id",
+                          tuple(params))
+        return [self._quarantine_row(row) for row in rows]
+
+    def insert_fact_correction(self, correction: dict) -> None:
+        self._insert_many(
+            "fact_corrections",
+            ["correction_id", "fingerprint", "fact_class", "natural_key",
+             "corrects", "corrected_by", "as_of", "supersedes",
+             "rules_version", "payload"],
+            [(
+                correction["correction_id"], correction["fingerprint"],
+                correction["fact_class"], correction["natural_key"],
+                correction["corrects"], correction["corrected_by"],
+                correction["as_of"], correction["supersedes"],
+                correction["rules_version"], json.dumps(correction),
+            )],
+        )
+
+    def _correction_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_fact_correction(self, correction_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM fact_corrections "
+            f"WHERE correction_id = {self._ph}",
+            (correction_id,),
+        )
+        return self._correction_row(rows[0]) if rows else None
+
+    def correction_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM fact_corrections "
+            f"WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._correction_row(rows[0]) if rows else None
+
+    def list_fact_corrections(self, fact_class=None,
+                              natural_key=None) -> list[dict]:
+        sql, params = "SELECT * FROM fact_corrections WHERE 1=1", []
+        for column, value in (("fact_class", fact_class),
+                              ("natural_key", natural_key)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY fact_class, natural_key, as_of, "
+                          "correction_id", tuple(params))
+        return [self._correction_row(row) for row in rows]
 
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}

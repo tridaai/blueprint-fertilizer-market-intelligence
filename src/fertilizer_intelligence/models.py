@@ -114,6 +114,22 @@ class PolicyEvent(Fact):
     impacted_products: list[str]
 
 
+class SeasonActual(Fact):
+    """A season-close actual (R11): what was really consumed
+    or dispatched in a district-season, imported after the
+    season closed. A distinct fact class — an actual is
+    never an estimate and never overwrites one; estimates
+    are scored against actuals by natural key in a later
+    round."""
+
+    district_id: str
+    crop_year: str
+    season: str
+    product: str
+    actual_kind: str  # consumption / dispatch
+    quantity_tonnes: float
+
+
 class FieldReport(Fact):
     report_id: str
     reporter: str  # named field officer / dealer — signals stay attributed
