@@ -53,6 +53,17 @@ def settings(tmp_path):
         try:
             yield _settings(_schema_url(_PG_BASE_URL, schema), tmp_path)
         finally:
+            # A surface under test may hold a store connection
+            # the fixtures never see (the API app builds its
+            # own service); its open read transaction would
+            # otherwise block the DROP. The suite is sequential
+            # and the database is the suite's alone, so any
+            # other backend here is a leftover of this test.
+            admin.execute(
+                "SELECT pg_terminate_backend(pid) "
+                "FROM pg_stat_activity "
+                "WHERE datname = current_database() "
+                "AND pid <> pg_backend_pid()")
             admin.execute(f'DROP SCHEMA "{schema}" CASCADE')
             admin.close()
         return
