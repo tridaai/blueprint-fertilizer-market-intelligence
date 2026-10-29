@@ -23,8 +23,10 @@ from .field import FieldReviewError
 from .logging_config import configure_logging, new_request_id, request_id_var
 from .market_map import MapRefused
 from .movements import AlertStateError
+from .notes import FollowupStateError
 from .queue import QueueStateError
 from .readiness import ReadinessRefused
+from .review import ReviewRefused
 from .rollups import RollupRefused
 from .scoring import ScoringRefused
 from .service import MarketService
@@ -221,6 +223,38 @@ class QueueActRequest(BaseModel):
     owner: str | None = None
     fork_id: str | None = None
     note: str | None = None
+
+
+class AnnotationRequest(BaseModel):
+    target_kind: str
+    target_id: str
+    author: str
+    at: str
+    text: str
+
+
+class FollowupRequest(BaseModel):
+    target_kind: str
+    target_id: str
+    assignee: str
+    created_by: str
+    at: str
+    text: str
+    due: str | None = None
+
+
+class FollowupActRequest(BaseModel):
+    act: str
+    actor: str
+    at: str
+    assignee: str | None = None
+    reason: str | None = None
+    note: str | None = None
+
+
+class ReviewQueueRequest(BaseModel):
+    struck_by: str
+    as_of: str
 
 
 class PackRequest(BaseModel):
@@ -1585,6 +1619,175 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         season: str | None = None,
     ) -> list[dict]:
         return service.list_readiness_refusals(region, crop_year, season)
+
+    # -- role scopes & the access audit log (R15) ---------
+
+    @app.get("/principals/{name}")
+    def principal_scope(name: str) -> dict:
+        return service.principal_scope(name)
+
+    @app.get("/scoped/districts")
+    def scoped_districts(principal: str) -> list[dict]:
+        return service.scoped_districts(principal)
+
+    @app.get("/scoped/competitor-observations")
+    def scoped_competitor_observations(
+        principal: str, at: str, competitor: str | None = None,
+        region: str | None = None, product: str | None = None,
+        season: str | None = None,
+    ) -> list[dict]:
+        return service.scoped_competitor_observations(
+            principal, at, competitor, region, product, season)
+
+    @app.get("/scoped/competitor-observations/{observation_id}")
+    def scoped_competitor_observation(
+        observation_id: str, principal: str, at: str,
+    ) -> dict:
+        row = service.scoped_competitor_observation(
+            principal, observation_id, at)
+        if row is None:
+            # Existence hiding: out of scope reads exactly
+            # as absent — the same 404 a missing
+            # observation gets, with no distinguishing
+            # detail.
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such competitor observation: "
+                       f"{observation_id}")
+        return row
+
+    @app.get("/scoped/market-share")
+    def scoped_market_share(
+        principal: str, district_id: str, product: str,
+        crop_year: str, season: str, at: str,
+        as_of: str | None = None,
+    ) -> dict:
+        row = service.scoped_market_share(
+            principal, district_id, product, crop_year,
+            season, at, as_of)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="no such market share")
+        return row
+
+    @app.get("/access-log")
+    def access_log() -> list[dict]:
+        return service.access_log()
+
+    @app.get("/access-log/verify")
+    def verify_access_log() -> dict:
+        return service.verify_access_log()
+
+    # -- annotations & follow-ups (R15) -------------------
+
+    @app.post("/annotations")
+    def annotate(body: AnnotationRequest) -> dict:
+        try:
+            return service.annotate(
+                body.target_kind, body.target_id, body.author,
+                body.at, body.text)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/annotations")
+    def list_annotations(
+        target_kind: str | None = None,
+        target_id: str | None = None,
+        author: str | None = None,
+    ) -> list[dict]:
+        return service.list_annotations(target_kind, target_id, author)
+
+    @app.get("/annotations/{annotation_id}")
+    def get_annotation(annotation_id: str) -> dict:
+        row = service.get_annotation(annotation_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such annotation: {annotation_id}")
+        return row
+
+    @app.post("/followups")
+    def create_followup(body: FollowupRequest) -> dict:
+        try:
+            return service.create_followup(
+                body.target_kind, body.target_id, body.assignee,
+                body.created_by, body.at, body.text, body.due)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/followups")
+    def list_followups(
+        target_kind: str | None = None,
+        target_id: str | None = None,
+        assignee: str | None = None,
+    ) -> list[dict]:
+        return service.list_followups(target_kind, target_id, assignee)
+
+    @app.get("/followups/{task_id}")
+    def get_followup(task_id: str) -> dict:
+        row = service.get_followup(task_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such follow-up task: {task_id}")
+        return row
+
+    @app.post("/followups/{task_id}/acts")
+    def record_followup_act(task_id: str,
+                            body: FollowupActRequest) -> dict:
+        try:
+            return service.record_followup_act(
+                task_id, body.act, body.actor, body.at,
+                assignee=body.assignee, reason=body.reason,
+                note=body.note)
+        except FollowupStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/notes/verify")
+    def verify_notes() -> dict:
+        return service.verify_notes()
+
+    # -- the publication review queue (R15) ---------------
+
+    @app.post("/review-queues")
+    def build_review_queue(body: ReviewQueueRequest) -> dict:
+        try:
+            return service.publication_review_queue(
+                body.struck_by, body.as_of)
+        except ReviewRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/review-queues")
+    def list_review_queues() -> list[dict]:
+        return service.list_review_queues()
+
+    @app.get("/review-queues/{queue_id}")
+    def get_review_queue(queue_id: str) -> dict:
+        row = service.get_review_queue(queue_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such review queue: {queue_id}")
+        return row
+
+    @app.get("/review-queues/{queue_id}/verify")
+    def verify_review_queue(queue_id: str) -> dict:
+        try:
+            return service.verify_review_queue(queue_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/review-refusals")
+    def list_review_refusals() -> list[dict]:
+        return service.list_review_refusals()
 
     return app
 

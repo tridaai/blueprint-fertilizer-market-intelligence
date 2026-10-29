@@ -1001,6 +1001,123 @@ def main() -> int:
           f" and "
           f"{service.verify_readiness(plan2['readiness_id'])['verified']}.")
 
+    print("\n--- Round 15: scopes, pins, follow-ups, the review queue ---")
+    service.build_competitor_observations()
+    verma_districts = service.scoped_districts("D. Verma")
+    all_districts = service.store.list_districts()
+    verma_regions = sorted({d["region"] for d in verma_districts})
+    print(f"  D. Verma (regional, north) enumerates "
+          f"{len(verma_districts)} of {len(all_districts)} "
+          f"districts — regions visible: "
+          f"{', '.join(verma_regions)}; the other regions' "
+          f"districts are not named to him at all.")
+    observations = service.store.list_competitor_observations()
+    south_obs = next(o for o in observations
+                     if o["district_id"] in
+                     {d["district_id"] for d in all_districts
+                      if d["region"] == "south"})
+    north_obs = next(o for o in observations
+                     if o["district_id"] in
+                     {d["district_id"] for d in all_districts
+                      if d["region"] == "north"})
+    nair_read = service.scoped_competitor_observation(
+        "P. Nair", south_obs["observation_id"], "2026-04-24")
+    nair_hidden = service.scoped_competitor_observation(
+        "P. Nair", north_obs["observation_id"], "2026-04-24")
+    guest_read = service.scoped_competitor_observation(
+        "Guest Viewer", south_obs["observation_id"], "2026-04-24")
+    print(f"  P. Nair (regional, south) reads the south "
+          f"observation {south_obs['observation_id']}: "
+          f"{nair_read is not None}; the north observation "
+          f"reads exactly as absent: {nair_hidden is None}; "
+          f"a viewer is refused the surface: "
+          f"{guest_read is None} — and every one of those "
+          f"decisions is in the access log, which the "
+          f"readers never see.")
+    audit = service.verify_access_log()
+    export_entries = [e for e in service.access_log()
+                      if e["surface"] == "export_pack"]
+    print(f"  the access log holds {len(service.access_log())} "
+          f"entries; its {len(export_entries)} export "
+          f"entries reconcile one-to-one with the store's "
+          f"{len(service.store.list_export_packs())} export "
+          f"packs; the log verifies: {audit['verified']}.")
+
+    estimates = service.store.list_estimates()
+    superseded_ids = {e["supersedes"] for e in estimates
+                      if e.get("supersedes")}
+    stale = next((e for e in estimates
+                  if e["estimate_id"] in superseded_ids), None)
+    if stale is not None:
+        pinned = service.annotate(
+            "demand_estimate", stale["estimate_id"],
+            "P. Nair", "2026-04-24",
+            "This number moved — check what the successor "
+            "says before quoting it.")
+        print(f"  an annotation pins estimate "
+              f"{stale['estimate_id']} as written; a "
+              f"successor has since taken its family's "
+              f"head, so the pin reads flagged, never "
+              f"moved: {pinned['pinned_to_superseded']}.")
+    gap15 = service.get_gap("MOP", "2025-26", "kharif")
+    task = service.create_followup(
+        "supply_gap", gap15["gap_id"], "K. Bhatt",
+        "P. Nair", "2026-04-24",
+        "Confirm the MOP import berthing window with the "
+        "port desk.", due="2026-05-01")
+    service.record_followup_act(
+        task["task_id"], "assign", "K. Bhatt", "2026-04-25",
+        assignee="S. Iyer")
+    done = service.record_followup_act(
+        task["task_id"], "complete", "S. Iyer", "2026-04-26",
+        note="Berthing window confirmed with the port desk.")
+    task_view = service.get_followup(task["task_id"])
+    print(f"  the follow-up on the MOP gap ({task['task_id']}) "
+          f"was assigned onward and completed by named "
+          f"acts; its state is a fold, not a field: "
+          f"{task_view['state']}, owner "
+          f"{task_view['owner']}; the notes verify: "
+          f"{service.verify_notes()['verified']}.")
+
+    queue = service.publication_review_queue(
+        "demo desk", "2026-04-24")
+    outlook_items = [i for i in queue["items"]
+                     if i["artefact_kind"] == "season_outlook"]
+    brief_items = [i for i in queue["items"]
+                   if i["artefact_kind"] == "weekly_brief"]
+    print(f"  the review queue ({queue['queue_id']}) holds "
+          f"{len(outlook_items)} outlook(s) and "
+          f"{len(brief_items)} brief(s) in draft state at "
+          f"its date — membership is the publication fold, "
+          f"not a list anyone keeps.")
+    if outlook_items:
+        item = outlook_items[0]
+        diff = item["diff"]
+        print(f"  first in the queue: outlook "
+              f"{item['artefact_id']} "
+              f"({item['crop_year']} {item['season']}), "
+              f"{item['driver_summary']['total_tonnes']:,.1f} t "
+              f"over {item['driver_summary']['estimate_count']} "
+              f"estimates, diff basis "
+              f"{diff['basis'].replace('_', ' ')} with "
+              f"{len(diff['changed_cells'])} changed cell(s).")
+        act = service.publish_artefact(
+            "season_outlook", item["artefact_id"],
+            "A. Rao", "2026-04-25",
+            note="Published from the review queue.")
+        published = service.publication_state(
+            "season_outlook", item["artefact_id"])
+        print(f"  published from the queue by A. Rao's act "
+              f"({act['act_id']}): the act binds exactly "
+              f"the fingerprint the reviewer saw — "
+              f"published equals reviewed: "
+              f"{act['artefact_fingerprint'] == item['reviewed_fingerprint']}; "
+              f"state now {published['status']}, and the "
+              f"decision log re-derives gaplessly: "
+              f"{service.verify_decision_log()['verified']}.")
+    print(f"  the queue itself re-derives from the record: "
+          f"{service.verify_review_queue(queue['queue_id'])['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 

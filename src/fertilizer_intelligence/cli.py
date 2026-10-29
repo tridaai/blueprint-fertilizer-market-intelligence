@@ -35,8 +35,10 @@ from pathlib import Path
 from .board import BoardRefused
 from .brief import BriefRefused
 from .market_map import MapRefused
+from .notes import FollowupStateError
 from .queue import QueueStateError
 from .readiness import ReadinessRefused
+from .review import ReviewRefused
 from .rollups import RollupRefused
 from .scoring import ScoringRefused
 from .config import Settings
@@ -526,6 +528,84 @@ def main(argv=None) -> int:
     p.add_argument("--region", default=None)
     p.add_argument("--crop-year", default=None)
     p.add_argument("--season", default=None)
+
+    p = sub.add_parser("principal", help="one reader's judged scope from the access pack register")
+    p.add_argument("name")
+
+    p = sub.add_parser("scoped-districts", help="the district register as one reader may enumerate it")
+    p.add_argument("--principal", required=True)
+
+    p = sub.add_parser("scoped-observations", help="competitor observations inside one reader's remit")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--competitor", default=None)
+    p.add_argument("--region", default=None)
+    p.add_argument("--product", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("scoped-share", help="the head market share through one reader's scope")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--district", required=True)
+    p.add_argument("--product", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("access-log", help="the access audit log, re-derived with its sequence")
+    p = sub.add_parser("verify-access-log", help="re-decide every entry and reconcile exports one-to-one")
+
+    p = sub.add_parser("annotate", help="pin a named comment to one exact artefact version")
+    p.add_argument("--kind", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--author", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--text", required=True)
+
+    p = sub.add_parser("annotations", help="list annotations, optionally by target")
+    p.add_argument("--kind", default=None)
+    p.add_argument("--target", default=None)
+    p.add_argument("--author", default=None)
+
+    p = sub.add_parser("followup", help="strike a follow-up task against an artefact version")
+    p.add_argument("--kind", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--assignee", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--text", required=True)
+    p.add_argument("--due", default=None)
+
+    p = sub.add_parser("followup-act", help="record an assign, complete or close act on a follow-up")
+    p.add_argument("task_id")
+    p.add_argument("--act", required=True)
+    p.add_argument("--actor", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--assignee", default=None)
+    p.add_argument("--reason", default=None)
+    p.add_argument("--note", default=None)
+
+    p = sub.add_parser("followups", help="list follow-up tasks with their folded state")
+    p.add_argument("--kind", default=None)
+    p.add_argument("--target", default=None)
+    p.add_argument("--assignee", default=None)
+
+    p = sub.add_parser("get-followup", help="read one follow-up task with its fold")
+    p.add_argument("task_id")
+
+    p = sub.add_parser("verify-notes", help="re-perform every annotation pin and follow-up fold")
+
+    p = sub.add_parser("review-queue", help="strike (or return) the publication review queue at a date")
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("review-queues", help="list stored review queues")
+    p = sub.add_parser("get-review-queue", help="read one stored review queue")
+    p.add_argument("queue_id")
+
+    p = sub.add_parser("verify-review-queue", help="re-derive a stored queue's membership and diffs")
+    p.add_argument("queue_id")
+
+    p = sub.add_parser("review-refusals", help="list recorded review queue refusals")
 
     p = sub.add_parser("pack", help="export a product, region or territory report pack")
     p.add_argument("--kind", required=True, choices=["product", "region", "territory"])
@@ -1157,6 +1237,68 @@ def main(argv=None) -> int:
                 args.district, args.crop_year, args.season, args.product)
         elif args.command == "actuals-report":
             result = service.actuals_report(args.crop_year, args.season)
+        elif args.command == "principal":
+            result = service.principal_scope(args.name)
+        elif args.command == "scoped-districts":
+            result = service.scoped_districts(args.principal)
+        elif args.command == "scoped-observations":
+            result = service.scoped_competitor_observations(
+                args.principal, args.at, competitor=args.competitor,
+                region=args.region, product=args.product,
+                season=args.season)
+        elif args.command == "scoped-share":
+            result = service.scoped_market_share(
+                args.principal, args.district, args.product,
+                args.crop_year, args.season, args.at)
+            if result is None:
+                print("no such market share", file=sys.stderr)
+                return 2
+        elif args.command == "access-log":
+            result = service.access_log()
+        elif args.command == "verify-access-log":
+            result = service.verify_access_log()
+        elif args.command == "annotate":
+            result = service.annotate(
+                args.kind, args.target, args.author, args.at,
+                args.text)
+        elif args.command == "annotations":
+            result = service.list_annotations(
+                args.kind, args.target, args.author)
+        elif args.command == "followup":
+            result = service.create_followup(
+                args.kind, args.target, args.assignee, args.by,
+                args.at, args.text, args.due)
+        elif args.command == "followup-act":
+            result = service.record_followup_act(
+                args.task_id, args.act, args.actor, args.at,
+                assignee=args.assignee, reason=args.reason,
+                note=args.note)
+        elif args.command == "followups":
+            result = service.list_followups(
+                args.kind, args.target, args.assignee)
+        elif args.command == "get-followup":
+            result = service.get_followup(args.task_id)
+            if result is None:
+                print(f"no such follow-up task: {args.task_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-notes":
+            result = service.verify_notes()
+        elif args.command == "review-queue":
+            result = service.publication_review_queue(
+                args.by, args.as_of)
+        elif args.command == "review-queues":
+            result = service.list_review_queues()
+        elif args.command == "get-review-queue":
+            result = service.get_review_queue(args.queue_id)
+            if result is None:
+                print(f"no such review queue: {args.queue_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-review-queue":
+            result = service.verify_review_queue(args.queue_id)
+        elif args.command == "review-refusals":
+            result = service.list_review_refusals()
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:
@@ -1188,6 +1330,14 @@ def main(argv=None) -> int:
         print(json.dumps(
             {"refused": exc.problems, "refusal_id": exc.refusal_id},
             indent=2), file=sys.stderr)
+        return 2
+    except ReviewRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except FollowupStateError as exc:
+        print(str(exc), file=sys.stderr)
         return 2
     except QueueStateError as exc:
         print(str(exc), file=sys.stderr)
