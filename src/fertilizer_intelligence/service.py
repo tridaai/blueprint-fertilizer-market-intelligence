@@ -2171,13 +2171,13 @@ class MarketService:
         observation returns — and every outcome appends
         its access entry."""
         row = self.store.get_competitor_observation(observation_id)
-        district_id = row["district_id"] if row else None
         product = row["product"] if row else None
+        region = row["region"] if row else None
         entry = access_engine.record_entry(
             self.store, principal_name,
             access_pack.SURFACE_COMPETITOR,
             f"competitor_observation:{observation_id}",
-            district_id, product, at)
+            None, product, at, region=region)
         if row is None \
                 or entry["decision"] != access_pack.DECISION_ALLOWED:
             return None
@@ -2200,13 +2200,14 @@ class MarketService:
             judged = access_engine.decide(
                 self.store, principal,
                 access_pack.SURFACE_COMPETITOR,
-                row["district_id"], row["product"])
+                None, row["product"], region=row["region"])
             if judged["decision"] == access_pack.DECISION_ALLOWED:
                 visible.append(row)
         access_engine.record_entry(
             self.store, principal_name,
             access_pack.SURFACE_COMPETITOR,
-            "competitor_observations", None, product, at)
+            "competitor_observations", None, product, at,
+            region=region)
         return visible
 
     def scoped_market_share(self, principal_name, district_id,

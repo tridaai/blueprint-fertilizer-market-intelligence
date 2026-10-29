@@ -1013,13 +1013,9 @@ def main() -> int:
           f"districts are not named to him at all.")
     observations = service.store.list_competitor_observations()
     south_obs = next(o for o in observations
-                     if o["district_id"] in
-                     {d["district_id"] for d in all_districts
-                      if d["region"] == "south"})
+                     if o["region"] == "south")
     north_obs = next(o for o in observations
-                     if o["district_id"] in
-                     {d["district_id"] for d in all_districts
-                      if d["region"] == "north"})
+                     if o["region"] == "north")
     nair_read = service.scoped_competitor_observation(
         "P. Nair", south_obs["observation_id"], "2026-04-24")
     nair_hidden = service.scoped_competitor_observation(
@@ -1043,20 +1039,20 @@ def main() -> int:
           f"{len(service.store.list_export_packs())} export "
           f"packs; the log verifies: {audit['verified']}.")
 
-    estimates = service.store.list_estimates()
-    superseded_ids = {e["supersedes"] for e in estimates
-                      if e.get("supersedes")}
-    stale = next((e for e in estimates
-                  if e["estimate_id"] in superseded_ids), None)
-    if stale is not None:
+    gaps15 = service.store.list_gaps()
+    superseded_gap_ids = {g["supersedes"] for g in gaps15
+                          if g.get("supersedes")}
+    stale_gap = next((g for g in gaps15
+                      if g["gap_id"] in superseded_gap_ids), None)
+    if stale_gap is not None:
         pinned = service.annotate(
-            "demand_estimate", stale["estimate_id"],
+            "supply_gap", stale_gap["gap_id"],
             "P. Nair", "2026-04-24",
-            "This number moved — check what the successor "
-            "says before quoting it.")
-        print(f"  an annotation pins estimate "
-              f"{stale['estimate_id']} as written; a "
-              f"successor has since taken its family's "
+            "This gap reading moved — check what the "
+            "successor says before quoting it.")
+        print(f"  an annotation pins gap "
+              f"{stale_gap['gap_id']} exactly as written; "
+              f"a successor has since taken its family's "
               f"head, so the pin reads flagged, never "
               f"moved: {pinned['pinned_to_superseded']}.")
     gap15 = service.get_gap("MOP", "2025-26", "kharif")

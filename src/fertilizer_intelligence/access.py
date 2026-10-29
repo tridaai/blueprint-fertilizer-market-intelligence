@@ -48,6 +48,7 @@ class AccessEntry(BaseModel):
     surface: str
     target: str
     district_id: str | None = None
+    region: str | None = None
     product: str | None = None
     decision: str
     reason: str
@@ -89,9 +90,13 @@ def region_of(store, district_id: str | None) -> str | None:
 
 def decide(store, principal: dict, surface: str,
            district_id: str | None = None,
-           product: str | None = None) -> dict:
+           product: str | None = None,
+           region: str | None = None) -> dict:
     """One scope decision, judged from the pack. Returns
-    the decision and the stated reason for it."""
+    the decision and the stated reason for it. A read's
+    geography arrives as a district (resolved to its
+    region from the register) or as a region directly —
+    competitor observations are struck per region."""
     role = principal["role"]
     if surface == pack.SURFACE_EXPORT:
         return {"decision": pack.DECISION_ALLOWED,
@@ -119,9 +124,10 @@ def decide(store, principal: dict, surface: str,
                     "reason": "the product is outside the "
                               "reader's remit"}
         if role == pack.ROLE_REGIONAL:
-            region = region_of(store, district_id)
-            if region is not None \
-                    and region in principal["regions"]:
+            judged_region = region if region is not None \
+                else region_of(store, district_id)
+            if judged_region is not None \
+                    and judged_region in principal["regions"]:
                 return {"decision": pack.DECISION_ALLOWED,
                         "reason": "the district is in the "
                                   "reader's region"}
@@ -152,11 +158,12 @@ def visible_districts(store, principal: dict) -> list[dict]:
 def build_entry(principal: dict, surface: str, target: str,
                 district_id: str | None, product: str | None,
                 decision: str, reason: str,
-                at: str) -> AccessEntry:
+                at: str, region: str | None = None) -> AccessEntry:
     fingerprint = _fingerprint({
         "principal": principal["name"], "role": principal["role"],
         "surface": surface, "target": target,
-        "district_id": district_id, "product": product,
+        "district_id": district_id, "region": region,
+        "product": product,
         "decision": decision, "reason": reason, "at": at,
         "pack": pack.RULES_VERSION,
     })
@@ -164,14 +171,15 @@ def build_entry(principal: dict, surface: str, target: str,
         entry_id=f"ACC-{fingerprint[:10]}",
         fingerprint=fingerprint, principal=principal["name"],
         role=principal["role"], surface=surface, target=target,
-        district_id=district_id, product=product,
+        district_id=district_id, region=region, product=product,
         decision=decision, reason=reason, at=at,
         rules_version=pack.RULES_VERSION)
 
 
 def record_entry(store, principal_name: str, surface: str,
                  target: str, district_id: str | None,
-                 product: str | None, at: str) -> dict:
+                 product: str | None, at: str,
+                 region: str | None = None) -> dict:
     """Judge one guarded action and append its entry.
     Returns the entry and the decision, so the caller
     renders allowed content or the absence shape. An
@@ -179,10 +187,11 @@ def record_entry(store, principal_name: str, surface: str,
     entry — recording is idempotent, never duplicated."""
     principal = resolve_principal(principal_name)
     judged = decide(store, principal, surface, district_id,
-                    product)
+                    product, region)
     entry = build_entry(principal, surface, target,
                         district_id, product,
-                        judged["decision"], judged["reason"], at)
+                        judged["decision"], judged["reason"], at,
+                        region)
     existing = store.get_access_entry(entry.entry_id)
     if existing is not None:
         return existing
@@ -215,7 +224,8 @@ def verify_access_log(store) -> list[str]:
             resolve_principal(entry["principal"]),
             entry["surface"], entry["target"],
             entry["district_id"], entry["product"],
-            entry["decision"], entry["reason"], entry["at"])
+            entry["decision"], entry["reason"], entry["at"],
+            entry.get("region"))
         if rebuilt.entry_id != entry["entry_id"] \
                 or rebuilt.fingerprint != entry["fingerprint"]:
             problems.append(
@@ -229,7 +239,7 @@ def verify_access_log(store) -> list[str]:
             continue
         judged = decide(store, resolve_principal(entry["principal"]),
                         entry["surface"], entry["district_id"],
-                        entry["product"])
+                        entry["product"], entry.get("region"))
         if judged["decision"] != entry["decision"]:
             problems.append(
                 f"access entry {entry['entry_id']}: recorded "
