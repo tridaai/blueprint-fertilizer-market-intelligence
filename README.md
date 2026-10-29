@@ -564,6 +564,62 @@ and never presents a stale figure as current.
   mutated by fork, hypothetical leak, unbadged scenario
   figures served, adoption without a named act.
 
+## What Round 10 adds
+
+- **The weekly brief** — one artefact per stated week,
+  assembled from the system's artefacts only: the **demand
+  outlook position** for the brief's season scope (the
+  season containing the week's month under the brief
+  pack's attribution; months in neither window belong to
+  the latest closed season, stated as such), the
+  **price-watch alerts fired** in the week, the **supply
+  gaps open or changed**, the **policy events** effective
+  in the week's month, **competitor & share movement**
+  across the district × tracked-product grid with R6
+  staleness badges intact, and the **adopted planning
+  state** where R9 adoptions are in force. Every figure
+  carries its lineage — artefact id and that artefact's
+  as-of — and the drafted summary is figure-checked
+  against the brief's own figure set, exactly as the R2
+  outlook narrative is checked against its estimates.
+- **Wholesale refusal** — before a brief is stored, an
+  independent verifier re-performs every figure from its
+  pinned artefact and re-verifies each pinned artefact
+  under its own family's verifier. One wrong figure
+  refuses the brief wholesale: no partial brief, no
+  corrected-in-place brief. The refusal is itself an
+  artefact recording the problems; a later clean assembly
+  for the same week supersedes it by link. The demo's
+  showpiece is a draft corrupted at the intermediate step
+  — refused, recorded, then superseded.
+- **Report packs** — exportable packs per product and per
+  region (CSV tables plus a provenance appendix and a
+  checksum manifest), generated from artefacts at a stated
+  as-of. The manifest check names a tampered export file —
+  flip a byte in an exported figure and that file fails by
+  name — and the pack's figures additionally re-perform
+  against a fresh read of the store, so an export never
+  drifts from the artefacts it quotes.
+- **The publication gate & decision log** — nothing
+  renders as published without a **named publication act**:
+  publisher, timestamp, and the exact artefact version
+  bound by its fingerprint. Publication is insert-only; a
+  new published version supersedes by link, never edits.
+  The families are the week's briefs and the season's
+  outlooks; the target must verify under its family's
+  verifier at publication time, so an artefact the
+  verifier rejects cannot be published at all. The
+  **decision log** — who published what, when, superseding
+  which version — re-derives gaplessly from the acts
+  alone, and its verifier fails a forked, cyclic or
+  orphaned chain or an act whose target no longer matches
+  its bound hash. Drafts and published artefacts are
+  distinct on every surface: the API carries the
+  publication state on the brief, and the rendered page
+  badges "Published" only with an act behind it — an
+  unpublished brief carries the draft mark, never the
+  published one.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -706,15 +762,29 @@ SeaweedFS S3 gateway together.
   every figure) — migration 0009, API + CLI surfaces, a
   scenario panel kind in the dashboard pack, demo walk,
   tests and eval counters.
+- **Built and gated in R10:** the weekly brief, report
+  packs & the publication gate — a brief assembled for a
+  stated week from artefacts only (outlook position,
+  alerts, gaps, policy events, share movement with staleness
+  badges, adopted planning state), every figure carrying
+  artefact lineage; an independent verifier that re-performs
+  every figure and refuses a wrong brief wholesale, the
+  refusal recorded as an artefact; export packs per product
+  and region with a provenance appendix and a checksum
+  manifest that names a tampered file; and publication as
+  insert-only named acts binding the exact artefact version
+  by hash, with the decision log re-derived from the acts
+  alone and drafts distinguished from published artefacts
+  on every surface — migration 0010, API + CLI surfaces,
+  demo walk, tests and eval counters.
 - **The dataset is generated for this blueprint** — built in-repo by
   the seeded generator described above, because no openly licensed
   Indian district-level fertilizer dataset carries the provenance
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the weekly brief
-  (R10), the Postgres production smoke (R11) and the
-  console (R13).
+- **Not built yet (on the round map):** the Postgres
+  production smoke (R11) and the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -746,14 +816,16 @@ src/fertilizer_intelligence/
   dashboard.py       question parsing, dashboard specs, assembly, verification, rendering
   scenario_rules.py  the versioned scenario pack (lever catalogue, ranking criteria)
   scenario.py        scenario forks, planning options, adoptions, verifiers
+  brief_rules.py     the versioned brief pack (week + scope rules, sections, pack kinds, badges)
+  brief.py           weekly brief, figure verifier, report packs, publication acts + decision log
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0009 in sqlite + postgres dialects
+migrations/          0001-0010 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness wrappers
 evals/               the eval gate
 docs/                architecture.md

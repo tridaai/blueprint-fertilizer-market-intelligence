@@ -564,6 +564,95 @@ def main() -> int:
           f"{head_after == head_before and gap_after == gap_before}. "
           f"Hypotheticals live only in the fork artefacts.")
 
+    print("\n--- Round 10: the weekly brief, packs & publication ---")
+    from . import brief as brief_engine
+    from .modelport import ModelReply
+
+    class CorruptPort:
+        profile_name = "corrupt"
+        model_name = "corrupt-stub"
+
+        def complete(self, system, prompt):
+            return ModelReply(
+                text=prompt + "\nTotal estimated demand is "
+                              "999999.99 t.",
+                profile=self.profile_name, model=self.model_name,
+                input_tokens=0, output_tokens=0)
+
+    week = "2026-03-29"
+    try:
+        service.weekly_brief(week, "demo desk", port=CorruptPort())
+        print("\n  the corrupted draft was accepted — this must "
+              "never print")
+    except brief_engine.BriefRefused as refused:
+        print(f"\nThe brief's first draft is corrupted at the "
+              f"intermediate step — it invents a figure. The "
+              f"verifier refuses the brief wholesale; nothing is "
+              f"stored, and the refusal is on record as "
+              f"{refused.refusal_id}:")
+        for problem in refused.problems:
+            print(f"    refused: {problem}")
+
+    brief = service.weekly_brief(week, "demo desk")
+    figures = sum(len(s["figures"]) for s in brief["sections"])
+    print(f"\nAssembled clean, the brief {brief['brief_id']} for "
+          f"the week {brief['week_start']} to {brief['week_ending']} "
+          f"({brief['season_scope']['season']} "
+          f"{brief['season_scope']['crop_year']} scope) carries "
+          f"{figures} figures, each with its artefact lineage:")
+    for section in brief["sections"]:
+        print(f"    {section['title']:<28} "
+              f"{len(section['figures']):>3} figures from "
+              f"{len(section['artefact_ids'])} artefacts")
+        for note in section["notes"][:1]:
+            print(f"      note: {note}")
+    print(f"  the clean brief supersedes the refusal by link "
+          f"({brief['supersedes_refusal']}), and it verifies: "
+          f"{service.verify_brief(brief['brief_id'])['verified']}.")
+
+    print(f"\nBefore any act, the brief renders as a draft: "
+          f"{brief['publication']}. A named publisher publishes "
+          f"the exact version, bound by its fingerprint:")
+    act = service.publish_artefact(
+        "weekly_brief", brief["brief_id"],
+        "A. Raman (head of strategy)", "2026-03-30",
+        note="week ending 29 March, for the Monday meeting")
+    outlook_act = service.publish_artefact(
+        "season_outlook", brief["sections"][0]["artefact_ids"][0],
+        "A. Raman (head of strategy)", "2026-03-30")
+    state = service.publication_state("weekly_brief", brief["brief_id"])
+    print(f"    {act['act_id']}: {act['artefact_id']} published by "
+          f"{act['published_by']} — state now {state['status']}, "
+          f"current: {state['is_current']}.")
+    print(f"    the season outlook is published under its own "
+          f"family ({outlook_act['family_key']}). The decision "
+          f"log re-derives from the acts alone:")
+    for entry in service.decision_log():
+        print(f"    #{entry['seq']} {entry['published_at']} "
+              f"{entry['published_by']} published "
+              f"{entry['artefact_id']} ({entry['family_key']})")
+    print(f"  the log verifies gapless: "
+          f"{service.verify_decision_log()['verified']}.")
+
+    pack_row = service.export_pack("product", "DAP", "demo desk",
+                                   "2026-03-31")
+    out_dir = tmp / "dap-pack"
+    service.write_pack(pack_row["pack_id"], out_dir)
+    print(f"\nThe DAP report pack {pack_row['pack_id']} exports "
+          f"{len(pack_row['appendix'])} provenance entries over "
+          f"{sorted(pack_row['manifest'])}; it verifies against "
+          f"the store: "
+          f"{service.verify_pack(pack_row['pack_id'])['verified']}.")
+    target = out_dir / "demand.csv"
+    data = bytearray(target.read_bytes())
+    data[20] = ord("9") if data[20] != ord("9") else ord("1")
+    target.write_bytes(bytes(data))
+    caught = service.verify_pack_dir(pack_row["pack_id"], out_dir)
+    print(f"  one byte flipped in the exported demand.csv — the "
+          f"manifest names it:")
+    for problem in caught["problems"]:
+        print(f"    tamper: {problem}")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 

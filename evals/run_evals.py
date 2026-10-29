@@ -241,6 +241,45 @@ Round 9 adds the scenario counters (all zero-tolerance):
                                    anyway, or a chain whose head
                                    is not the latest act
 
+Round 10 adds the brief & publication counters (all zero-tolerance):
+  - brief_figure_mismatch ....... a brief whose figures do
+                                   not re-perform from their
+                                   pinned artefacts, or a
+                                   figure value that differs
+                                   from its source artefact
+  - brief_figures_without_lineage
+                                   a brief figure carrying no
+                                   artefact id or source as-of,
+                                   or naming an artefact that
+                                   is not in the store
+  - brief_refusal_missing ........ a corrupted draft that
+                                   was stored anyway, or whose
+                                   wholesale refusal was not
+                                   recorded as an artefact
+  - brief_tamper_undetected ...... a brief figure altered
+                                   behind the store's back
+                                   that the brief verifier did
+                                   not catch
+  - publication_without_act ...... an artefact rendering as
+                                   published with no act naming
+                                   it, an unnamed publication
+                                   that was recorded, or a
+                                   publication of an unverified
+                                   artefact
+  - decision_log_gaps ............ a decision log that does
+                                   not re-derive gaplessly from
+                                   the acts, or a family chain
+                                   that forks, cycles or orphans
+                                   an act
+  - pack_figure_mismatch ......... an export pack whose
+                                   figures differ from the
+                                   store's reads, or a tampered
+                                   pack the verifier did not
+                                   catch
+  - pack_checksum_undetected ..... an exported file altered
+                                   after export that the
+                                   manifest check did not name
+
 Later rounds extend this gate: spike/delay grading depth (R12).
 """
 
@@ -1523,7 +1562,155 @@ def main() -> int:
     if values9a != values9b:
         counters["scenario_hypothetical_leak"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9 evals — fertilizer market intelligence")
+    # --- Round 10: weekly brief, packs, publication gate -------
+    # The brief assembles from artefacts only and verifies
+    # figure by figure; a corrupted draft is refused wholesale
+    # with the refusal on record; tampering anywhere is
+    # caught; nothing renders as published without a named
+    # act; the decision log re-derives gaplessly; packs
+    # export figures that match reads, under a checksum
+    # manifest that names a tampered file.
+    import json as _json10
+    import sqlite3 as _sqlite10
+
+    from fertilizer_intelligence import brief as _brief10
+    from fertilizer_intelligence.modelport import ModelReply as _Reply10
+
+    counters.setdefault("brief_figure_mismatch", 0)
+    counters.setdefault("brief_figures_without_lineage", 0)
+    counters.setdefault("brief_refusal_missing", 0)
+    counters.setdefault("brief_tamper_undetected", 0)
+    counters.setdefault("publication_without_act", 0)
+    counters.setdefault("decision_log_gaps", 0)
+    counters.setdefault("pack_figure_mismatch", 0)
+    counters.setdefault("pack_checksum_undetected", 0)
+
+    WEEK10 = "2026-03-29"
+
+    class _Corrupt10:
+        profile_name = "corrupt"
+        model_name = "corrupt-stub"
+
+        def complete(self, system, prompt):
+            return _Reply10(
+                text=prompt + "\nTotal estimated demand is "
+                              "999999.99 t.",
+                profile=self.profile_name, model=self.model_name,
+                input_tokens=0, output_tokens=0)
+
+    try:
+        service.weekly_brief(WEEK10, "evals", port=_Corrupt10())
+        counters["brief_refusal_missing"] += 1  # accepted!
+    except _brief10.BriefRefused as refused10:
+        if refused10.refusal_id is None or \
+                store.get_brief_refusal(refused10.refusal_id) is None:
+            counters["brief_refusal_missing"] += 1
+    if store.list_weekly_briefs():
+        counters["brief_refusal_missing"] += 1  # a brief was stored
+
+    brief10 = service.weekly_brief(WEEK10, "evals")
+    refusal10 = store.list_brief_refusals(week_ending=WEEK10)
+    if not refusal10 or \
+            brief10["supersedes_refusal"] != refusal10[-1]["refusal_id"]:
+        counters["brief_refusal_missing"] += 1
+    if not service.verify_brief(brief10["brief_id"])["verified"]:
+        counters["brief_figure_mismatch"] += 1
+
+    def _artefact_exists10(artefact_id: str) -> bool:
+        return any([
+            store.get_outlook(artefact_id),
+            store.get_alert(artefact_id),
+            store.get_gap(artefact_id),
+            store.get_policy_registration(artefact_id),
+            store.get_share_movement(artefact_id),
+            store.get_share(artefact_id),
+            store.get_planning_adoption(artefact_id),
+        ])
+
+    for section10 in brief10["sections"]:
+        for figure10 in section10["figures"]:
+            if not figure10.get("artefact_id") \
+                    or not figure10.get("source_as_of"):
+                counters["brief_figures_without_lineage"] += 1
+            elif not _artefact_exists10(figure10["artefact_id"]):
+                counters["brief_figures_without_lineage"] += 1
+
+    raw10 = _sqlite10.connect(settings.sqlite_path)
+    row10 = raw10.execute(
+        "SELECT payload FROM weekly_briefs WHERE brief_id = ?",
+        (brief10["brief_id"],)).fetchone()
+    saved10 = row10[0]
+    payload10 = _json10.loads(saved10)
+    payload10["sections"][0]["figures"][0]["value"] += 1.0
+    raw10.execute(
+        "UPDATE weekly_briefs SET payload = ? WHERE brief_id = ?",
+        (_json10.dumps(payload10), brief10["brief_id"]))
+    raw10.commit()
+    if service.verify_brief(brief10["brief_id"])["verified"]:
+        counters["brief_tamper_undetected"] += 1
+    raw10.execute(
+        "UPDATE weekly_briefs SET payload = ? WHERE brief_id = ?",
+        (saved10, brief10["brief_id"]))
+    raw10.commit()
+    raw10.close()
+    if not service.verify_brief(brief10["brief_id"])["verified"]:
+        counters["brief_tamper_undetected"] += 1
+
+    if service.publication_state(
+            "weekly_brief", brief10["brief_id"])["status"] != "draft":
+        counters["publication_without_act"] += 1
+    try:
+        service.publish_artefact(
+            "weekly_brief", brief10["brief_id"], " ", WEEK10)
+        counters["publication_without_act"] += 1  # accepted!
+    except ValueError:
+        pass
+    if store.list_publication_acts():
+        counters["publication_without_act"] += 1
+    act10 = service.publish_artefact(
+        "weekly_brief", brief10["brief_id"], "evals publisher",
+        "2026-03-30")
+    state10 = service.publication_state(
+        "weekly_brief", brief10["brief_id"])
+    if state10["status"] != "published" \
+            or state10["act_id"] != act10["act_id"]:
+        counters["publication_without_act"] += 1
+    outlook10 = brief10["sections"][0]["artefact_ids"][0]
+    service.publish_artefact(
+        "season_outlook", outlook10, "evals publisher", "2026-03-30")
+    log10 = service.decision_log()
+    if [e["seq"] for e in log10] != [1, 2]:
+        counters["decision_log_gaps"] += 1
+    if not service.verify_decision_log()["verified"]:
+        counters["decision_log_gaps"] += 1
+
+    pack10 = service.export_pack("product", "DAP", "evals", WEEK10)
+    if not service.verify_pack(pack10["pack_id"])["verified"]:
+        counters["pack_figure_mismatch"] += 1
+    files10 = _brief10.render_pack_files(pack10)
+    tampered10 = dict(files10)
+    data10 = bytearray(tampered10["demand.csv"])
+    data10[20] = ord("9") if data10[20] != ord("9") else ord("1")
+    tampered10["demand.csv"] = bytes(data10)
+    problems10 = _brief10.verify_pack_files(pack10, tampered10)
+    if not any("demand.csv" in p for p in problems10):
+        counters["pack_checksum_undetected"] += 1
+    raw10 = _sqlite10.connect(settings.sqlite_path)
+    row10 = raw10.execute(
+        "SELECT payload FROM export_packs WHERE pack_id = ?",
+        (pack10["pack_id"],)).fetchone()
+    saved10 = row10[0]
+    payload10 = _json10.loads(saved10)
+    payload10["tables"]["demand"][0]["total_tonnes"] += 5.0
+    raw10.execute(
+        "UPDATE export_packs SET payload = ? WHERE pack_id = ?",
+        (_json10.dumps(payload10), pack10["pack_id"]))
+    raw10.commit()
+    raw10.close()
+    if service.verify_pack(pack10["pack_id"])["verified"]:
+        counters["pack_figure_mismatch"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]

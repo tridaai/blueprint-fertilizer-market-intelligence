@@ -119,11 +119,20 @@ question explicitly names, with every figure badged as a
 scenario and the dashboard verifier failing an unbadged
 one.
 
-Later rounds add, behind the same ports: the weekly brief
-with its figure verifier. The LangGraph workflow
-(ingest → estimate → assemble → brief → publish gate)
-orchestrates those steps; every state transition is a
-stored artefact.
+Round 10 adds the weekly brief behind the same ports:
+`brief_rules.py` states the pack once (the week window,
+the season-scope rule, the section order, the pack kinds
+and table columns, the appendix and manifest names, the
+draft and published badges), and `brief.py` collects a
+week's sections from the heads of record, assembles the
+brief only after the figure verifier re-performs every
+figure from its pinned artefact and the narrative passes
+the shared figure check (migration 0010), builds export
+packs with a provenance appendix and a checksum manifest,
+and records publication as insert-only acts whose chains
+form the decision log. The LangGraph workflow (ingest →
+estimate → assemble → brief → publish gate) orchestrates
+those steps; every state transition is a stored artefact.
 
 ## The invariants
 
@@ -272,6 +281,39 @@ stored artefact.
   is a pure function of the stored content, so a stored page
   that was altered after assembly fails verification
   byte-for-byte.
+- **A brief is a verified selection, refused wholesale.** A
+  weekly brief's sections are collected from the heads of
+  record at its as-of under the brief pack's scope rule, and
+  every figure carries its artefact lineage. Before a brief
+  is stored, the verifier re-performs every figure from its
+  pinned artefact and re-verifies each pinned artefact under
+  its own family's verifier, and the drafted summary is
+  admitted only if every number in it belongs to the brief's
+  figure set. One wrong figure refuses the whole brief: no
+  partial brief is stored and no brief is corrected in
+  place — the refusal is its own artefact, and a later clean
+  assembly for the same week supersedes it by link.
+- **Published is an act, never a field.** No artefact table
+  carries a published flag. Publication is an insert-only
+  act by a named publisher binding the exact artefact
+  version by fingerprint; the target must verify under its
+  family's verifier at publication time. Acts form one
+  supersedes chain per family (a week's briefs, a season's
+  outlooks), publication state is the fold of the acts, and
+  the decision log re-derives from the acts alone — the
+  log's verifier requires each family's chain to be
+  unbroken and each act to still bind the artefact it
+  published, so a tampered target or a broken chain is
+  detectable forever.
+- **Exports carry their own proof.** A report pack's files
+  are rendered purely from the stored pack artefact, which
+  carries a checksum manifest over them and a provenance
+  appendix naming the artefact behind every table. A byte
+  flipped in an exported file fails its checksum and is
+  named; the pack's tables additionally re-perform against
+  a fresh collection from the store at the pack's as-of, so
+  an export figure that differs from the read is a defect
+  the verifier states, not a discrepancy a reader must find.
 - **The manifest is the truth.** Anything the generator plants
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
@@ -280,7 +322,7 @@ stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0009)
+## Data model (migrations 0001–0010)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -398,6 +440,25 @@ and a `supersedes` link as columns; the full act in the
 payload). All three are insert-only; no head table
 references them, and the current adoption for a comparison
 is the head of its supersedes chain.
+
+Brief tables (0010): `weekly_briefs` (one row per verified
+brief: the week start and ending, the as-of, the assembler
+and the brief pack version as columns; the season scope,
+the sections with their figures and lineage, the verified
+narrative and the `supersedes_refusal` link in the payload),
+`brief_refusals` (one row per refused assembly: the week,
+the as-of, the assembler and the pack version as columns;
+the refusal's problems in the payload), `export_packs`
+(one row per pack: kind, key, as-of, exporter and pack
+version as columns; the tables, the provenance appendix
+and the checksum manifest in the payload), and
+`publication_acts` (one row per act: the artefact kind and
+id, the family key, the named publisher, the publication
+date and a `supersedes` link as columns; the bound
+artefact fingerprint and the full act in the payload). All
+four are insert-only; a brief's publication state is the
+fold of the acts that name it, and a family's current
+published artefact is its head act's target.
 
 ## Deployment
 
