@@ -26,6 +26,8 @@ from . import movements as movement_engine
 from . import policy as policy_engine
 from . import queue as queue_engine
 from . import queue_rules as queue_pack
+from . import readiness as readiness_engine
+from . import rollups as rollup_engine
 from . import scenario as scenario_engine
 from . import scoring as scoring_engine
 from . import share as share_engine
@@ -1480,6 +1482,9 @@ class MarketService:
         if pack_kind == brief_pack.PACK_REGION:
             return brief_engine.collect_region_pack(
                 self, pack_key, as_of)
+        if pack_kind == brief_pack.PACK_TERRITORY:
+            return brief_engine.collect_territory_pack(
+                self, pack_key, as_of)
         raise ValueError(
             f"pack kind {pack_kind!r} is not a pack kind — the "
             f"brief pack names {brief_pack.PACK_KINDS}")
@@ -1980,6 +1985,155 @@ class MarketService:
     def verify_queue(self, as_of) -> dict:
         problems = queue_engine.verify_queue(self.store, as_of)
         return {"verified": not problems, "problems": problems}
+
+    # -- regional rollups & season readiness (R14) -----------
+
+    def _ensure_rollup_inputs(self, crop_year, season, as_of):
+        """Strike the artefacts a rollup sums and a
+        readiness plan scores: the season's outlook and
+        the positionable products' gaps. All
+        compute-or-return, so ensuring is cheap on a warm
+        store."""
+        self.demand_outlook(crop_year, season, as_of)
+        positionable = supply_engine.positionable_products(self.store)
+        for product in PRODUCTS:
+            if product in positionable:
+                self.supply_gap(product, crop_year, season, as_of)
+
+    def regional_rollup(self, crop_year, season, built_by,
+                        as_of) -> dict:
+        """Strike the regional rollup for one season: the
+        head outlook's member estimates grouped by region
+        and summed district → region → national.
+
+        The candidate is re-performed by the verifier's
+        second route before anything is stored; one figure
+        that differs from its members refuses the whole
+        rollup and records a refusal artefact.
+        Compute-or-return: an unchanged record returns the
+        stored rollup; a moved record supersedes by link."""
+        if not built_by or not built_by.strip():
+            raise ValueError(
+                "a rollup names who built it — an unnamed "
+                "build is refused")
+        self._ensure_rollup_inputs(crop_year, season, as_of)
+        candidate = rollup_engine.build_rollup(
+            self.store, crop_year, season, as_of, built_by)
+        problems = rollup_engine.verify_rollup(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = rollup_engine.build_refusal(
+                crop_year, season, as_of, built_by, problems)
+            if self.store.get_rollup_refusal(refusal.refusal_id) is None:
+                self.store.insert_rollup_refusal(refusal.model_dump())
+            raise rollup_engine.RollupRefused(
+                problems, refusal.refusal_id)
+        existing = self.store.get_regional_rollup(candidate.rollup_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_regional_rollups(crop_year, season),
+            "rollup_id")
+        if head is not None and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["rollup_id"] if head else None})
+        self.store.insert_regional_rollup(candidate.model_dump())
+        log.info("regional rollup stored: %s", candidate.rollup_id)
+        return self.store.get_regional_rollup(candidate.rollup_id)
+
+    def get_rollup(self, rollup_id) -> dict | None:
+        return self.store.get_regional_rollup(rollup_id)
+
+    def list_rollups(self, crop_year=None, season=None) -> list[dict]:
+        return self.store.list_regional_rollups(crop_year, season)
+
+    def verify_rollup(self, rollup_id) -> dict:
+        row = self.store.get_regional_rollup(rollup_id)
+        if row is None:
+            raise ValueError(f"no such regional rollup: {rollup_id}")
+        problems = rollup_engine.verify_rollup(self.store, row)
+        return {"rollup_id": rollup_id, "verified": not problems,
+                "problems": problems}
+
+    def list_rollup_refusals(self, crop_year=None,
+                             season=None) -> list[dict]:
+        return self.store.list_rollup_refusals(crop_year, season)
+
+    def season_readiness(self, region, crop_year, season, struck_by,
+                         as_of) -> dict:
+        """Strike one region's season readiness plan: four
+        lines scored from the artefacts, never
+        self-declared.
+
+        The candidate's lines are re-derived by the
+        verifier's second route before anything is
+        stored; one line that drifts from the record
+        refuses the whole plan and records a refusal
+        artefact. Compute-or-return: an unchanged record
+        at the same date returns the stored plan; a moved
+        record supersedes by link."""
+        if not struck_by or not struck_by.strip():
+            raise ValueError(
+                "a readiness plan names who struck it — an "
+                "unnamed strike is refused")
+        if region not in {d["region"]
+                          for d in self.store.list_districts()}:
+            raise ValueError(
+                f"no tracked district sits in region {region!r} "
+                f"— the tracked regions are "
+                f"{sorted({d['region'] for d in self.store.list_districts()})}")
+        self._ensure_rollup_inputs(crop_year, season, as_of)
+        self.gap_queue(as_of)
+        candidate = readiness_engine.build_readiness(
+            self.store, region, crop_year, season, as_of, struck_by)
+        problems = readiness_engine.verify_readiness(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = readiness_engine.build_refusal(
+                region, crop_year, season, as_of, struck_by, problems)
+            if self.store.get_readiness_refusal(
+                    refusal.refusal_id) is None:
+                self.store.insert_readiness_refusal(
+                    refusal.model_dump())
+            raise readiness_engine.ReadinessRefused(
+                problems, refusal.refusal_id)
+        existing = self.store.get_season_readiness(
+            candidate.readiness_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_season_readiness(region, crop_year, season),
+            "readiness_id")
+        if head is not None and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["readiness_id"] if head else None})
+        self.store.insert_season_readiness(candidate.model_dump())
+        log.info("season readiness stored: %s", candidate.readiness_id)
+        return self.store.get_season_readiness(candidate.readiness_id)
+
+    def get_readiness(self, readiness_id) -> dict | None:
+        return self.store.get_season_readiness(readiness_id)
+
+    def list_readiness(self, region=None, crop_year=None,
+                       season=None) -> list[dict]:
+        return self.store.list_season_readiness(
+            region, crop_year, season)
+
+    def verify_readiness(self, readiness_id) -> dict:
+        row = self.store.get_season_readiness(readiness_id)
+        if row is None:
+            raise ValueError(
+                f"no such readiness plan: {readiness_id}")
+        problems = readiness_engine.verify_readiness(self.store, row)
+        return {"readiness_id": readiness_id,
+                "verified": not problems, "problems": problems}
+
+    def list_readiness_refusals(self, region=None, crop_year=None,
+                                season=None) -> list[dict]:
+        return self.store.list_readiness_refusals(
+            region, crop_year, season)
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is

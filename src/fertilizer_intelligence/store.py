@@ -1837,6 +1837,159 @@ class MarketStore:
             (item_id,),
         )
 
+    def insert_regional_rollup(self, rollup: dict) -> None:
+        self._insert_many(
+            "regional_rollups",
+            ["rollup_id", "fingerprint", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                rollup["rollup_id"], rollup["fingerprint"],
+                rollup["crop_year"], rollup["season"],
+                rollup["as_of"], rollup["built_by"],
+                rollup["rules_version"], json.dumps(rollup),
+            )],
+        )
+
+    def _regional_rollup_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_regional_rollup(self, rollup_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM regional_rollups WHERE rollup_id = {self._ph}",
+            (rollup_id,),
+        )
+        return self._regional_rollup_row(rows[0]) if rows else None
+
+    def list_regional_rollups(self, crop_year=None,
+                              season=None) -> list[dict]:
+        sql, params = "SELECT * FROM regional_rollups WHERE 1=1", []
+        for column, value in (("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY crop_year, season, rollup_id",
+                          tuple(params))
+        return [self._regional_rollup_row(row) for row in rows]
+
+    def insert_rollup_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "rollup_refusals",
+            ["refusal_id", "fingerprint", "crop_year", "season",
+             "as_of", "built_by", "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["crop_year"], refusal["season"],
+                refusal["as_of"], refusal["built_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _rollup_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_rollup_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM rollup_refusals WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._rollup_refusal_row(rows[0]) if rows else None
+
+    def list_rollup_refusals(self, crop_year=None,
+                             season=None) -> list[dict]:
+        sql, params = "SELECT * FROM rollup_refusals WHERE 1=1", []
+        for column, value in (("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY crop_year, season, refusal_id",
+                          tuple(params))
+        return [self._rollup_refusal_row(row) for row in rows]
+
+    def insert_season_readiness(self, plan: dict) -> None:
+        self._insert_many(
+            "season_readiness",
+            ["readiness_id", "fingerprint", "region", "crop_year",
+             "season", "as_of", "struck_by", "rules_version",
+             "payload"],
+            [(
+                plan["readiness_id"], plan["fingerprint"],
+                plan["region"], plan["crop_year"], plan["season"],
+                plan["as_of"], plan["struck_by"],
+                plan["rules_version"], json.dumps(plan),
+            )],
+        )
+
+    def _season_readiness_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_season_readiness(self, readiness_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM season_readiness "
+            f"WHERE readiness_id = {self._ph}",
+            (readiness_id,),
+        )
+        return self._season_readiness_row(rows[0]) if rows else None
+
+    def list_season_readiness(self, region=None, crop_year=None,
+                              season=None) -> list[dict]:
+        sql, params = "SELECT * FROM season_readiness WHERE 1=1", []
+        for column, value in (("region", region),
+                              ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY region, crop_year, season, readiness_id",
+            tuple(params))
+        return [self._season_readiness_row(row) for row in rows]
+
+    def insert_readiness_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "readiness_refusals",
+            ["refusal_id", "fingerprint", "region", "crop_year",
+             "season", "as_of", "struck_by", "rules_version",
+             "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["region"], refusal["crop_year"],
+                refusal["season"], refusal["as_of"],
+                refusal["struck_by"], refusal["rules_version"],
+                json.dumps(refusal),
+            )],
+        )
+
+    def _readiness_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_readiness_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM readiness_refusals "
+            f"WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._readiness_refusal_row(rows[0]) if rows else None
+
+    def list_readiness_refusals(self, region=None, crop_year=None,
+                                season=None) -> list[dict]:
+        sql, params = "SELECT * FROM readiness_refusals WHERE 1=1", []
+        for column, value in (("region", region),
+                              ("crop_year", crop_year),
+                              ("season", season)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(
+            sql + " ORDER BY region, crop_year, season, refusal_id",
+            tuple(params))
+        return [self._readiness_refusal_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
