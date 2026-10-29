@@ -347,11 +347,34 @@ those steps; every state transition is a stored artefact.
   are folds of insert-only acts; a close must speak the pack's
   reason vocabulary, and a scenario link names a stored fork by
   reference and copies nothing.
+- **A rollup is a decomposition, never a rival figure.** The
+  regional rollup (R14) sums exactly the member estimates its
+  outlook names, grouped district → region → national; its
+  national total is the outlook's own total, re-performed by an
+  independent route that groups the store's estimate rows
+  directly. A partial member names its district and makes every
+  level above it partial; a memberless district is named missing
+  and contributes nothing — zero appears only next to the names
+  that explain it. Gap positions are carried by reference under
+  the head gap's own id and figures, with the demand basis
+  stated; the identity re-performance grades a gap's demand
+  against the rollup's national total only when the gap was
+  struck from this rollup's outlook.
+- **Readiness is scored, never declared.** A season readiness
+  plan's four lines are derivations over other artefacts at the
+  plan's date: the outlook line folds the publication acts (an
+  outlook counts only behind its act, and the act must name the
+  head outlook), the cover line reads the gap heads, the risks
+  line folds alert acts and queue acts, and the coverage line
+  folds field-review acts. The verifier re-derives every line by
+  a second route over the same record; because folds are by
+  date, acts recorded on a later date move the next plan and
+  never rewrite a struck one.
 - **Fail-closed model profiles.** Profile resolution happens at
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0013)
+## Data model (migrations 0001–0014)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -536,6 +559,21 @@ link's fork id as columns). Maps, boards and items are
 insert-only artefacts; queue acts are insert-only and an
 item's state exists nowhere as a column — it is the
 fold of its acts, exactly like an alert's.
+
+Rollup & readiness tables (0014): `regional_rollups`
+and `rollup_refusals` (one row per seasonal rollup or
+its refusal: crop year, season, strike date, the named
+builder and the rollup pack version as columns; the
+product blocks — member lines, region subtotals,
+national totals and the by-reference gap lines — in
+the payload), and `season_readiness` with
+`readiness_refusals` (one row per region's plan: the
+region as a column beside crop year, season, strike
+date, striker and pack version; the four scored lines
+with their figures in the payload). Both artefacts
+are insert-only and supersede by link; territory
+packs ride the existing `export_packs` table under
+the territory pack kind.
 
 ## Deployment
 

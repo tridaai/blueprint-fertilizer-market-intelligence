@@ -794,6 +794,69 @@ and never presents a stale figure as current.
   a throwaway store, and their pages are static and
   read-only: no form, no POST, no control verb.
 
+## What Round 14 adds
+
+- **Regional rollups** (roadmap F21-DR3) — one
+  insert-only artefact per season under the versioned
+  rollup pack (`rollup_rules`, 2026.10.1) that
+  decomposes the head outlook's own total: for every
+  product, the member estimates the outlook names are
+  grouped district → region → national, and every
+  figure is a sum of member artefacts — nothing is
+  re-estimated and nothing is re-derived from raw
+  facts. A district whose member estimate is partial
+  is named on the rollup's face and makes its region,
+  its product and the rollup itself partial; a district
+  with no member artefact is named as missing and
+  contributes nothing — it is never silently zero, so
+  a region can read 0 t only with every one of its
+  districts named missing beside the figure. The
+  product's gap position rides by reference: the head
+  gap's own figures under its own id, with the demand
+  basis stated — whether the gap was struck from this
+  rollup's outlook, in which case the verifier
+  cross-checks its demand against the rollup's
+  national total, or from an earlier one. When a
+  member is superseded the old rollup stays and a new
+  one supersedes it by link; the verifier re-performs
+  the identity by a second route (the store's estimate
+  rows grouped directly) and refuses the rollup
+  wholesale on one mismatched tonne, count or name.
+- **Territory packs** (F21-DR3) — a third export-pack
+  kind on the R10 machinery: one region's pack whose
+  three tables (region and national rollup rows, the
+  region's district member lines, the gap positions)
+  are rendered from the rollup artefact for the season
+  in scope at the pack's date, so every figure in the
+  pack is exactly the rollup's figure. The CSVs carry
+  the usual provenance appendix (every row's source
+  artefact named) and SHA-256 manifest — a flipped
+  byte in a written file is named by the pack
+  directory verifier.
+- **The season readiness plan** (roadmap F21-PO3) —
+  a pre-season checklist artefact per region under
+  the versioned readiness pack (`readiness_rules`,
+  2026.10.1), its four lines scored from artefacts,
+  never self-declared: the demand outlook published
+  (the head outlook counts only behind its R10
+  publication act, folded at the plan's date), supply
+  cover by product (every product with a supply side
+  has a head gap struck and none reads short — the
+  short product is named with its figures), open risks
+  (alerts standing open at the date by their act fold,
+  plus short gaps whose R13 queue item still has no
+  assign act — the struck default owner is named),
+  and field coverage (every district in the region
+  carries a field report for the season whose review
+  state at the date is confirmed). The plan names
+  exactly which lines block it; a region cannot read
+  ready over an unpublished outlook, an unowned short
+  gap, or any other incomplete line. Lines re-derive
+  on read by a second route, and a stored plan
+  verifies against the record it was struck from —
+  acts recorded on a later date move the next plan,
+  never rewrite this one.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -993,8 +1056,24 @@ SeaweedFS S3 gateway together.
   scenario links by reference) — migration 0013, API +
   CLI surfaces, a map/board checker script, demo walk,
   tests and five new eval counters.
-- **Not built yet (on the round map):** regional rollups
-  and territory planning (R14).
+- **Built and gated in R14:** regional rollups (the
+  outlook's total decomposed district → region →
+  national as sums of its named member estimates,
+  partial and missing districts named on the face, gap
+  positions carried by reference with their demand
+  basis stated), territory packs on the R10 export
+  machinery (every figure exactly the rollup's, the
+  manifest naming a tampered file), and the season
+  readiness plan (four lines scored from artefacts —
+  publication acts, gap heads, alert and queue act
+  folds, confirmed field reports — blocking lines
+  named, re-derived on read) — migration 0014, API +
+  CLI surfaces, demo walk, tests and four new eval
+  counters.
+- **Not built yet:** the LangGraph agent-orchestration
+  layer named in the stack (ingest → estimate →
+  assemble → brief → publish gate); the artefact
+  engines it would orchestrate are the rounds above.
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
