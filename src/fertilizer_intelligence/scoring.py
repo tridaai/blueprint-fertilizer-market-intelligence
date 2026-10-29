@@ -158,8 +158,7 @@ def _actual_batches(store, crop_year: str, season: str) -> list[str]:
     batch_ids = []
     for batch in store.list_ingest_batches(
             fact_class=ingest_pack.SEASON_ACTUALS):
-        inserted = (batch.get("inserted_rows") or {}).get(
-            ingest_pack.SEASON_ACTUALS) or []
+        inserted = (batch.get("inserted_rows") or {}).values()
         if any(row.get("crop_year") == crop_year
                and row.get("season") == season for row in inserted):
             batch_ids.append(batch["batch_id"])
