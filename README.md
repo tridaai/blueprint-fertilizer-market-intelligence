@@ -675,6 +675,53 @@ and never presents a stale figure as current.
   connector batch with an idempotent replay — against
   `DATABASE_URL`.
 
+## What Round 12 adds
+
+- **Season-close estimate scoring** — once a season has
+  closed, its head demand estimates are graded against
+  the actuals under the versioned scoring pack
+  (`scoring_rules`, 2026.10.1). Each cell — district ×
+  product × season, per actual kind — carries the signed
+  error in tonnes, the percentage error against the
+  actual, and the estimate's status as struck (a partial
+  estimate is graded as a partial). Nothing is
+  re-estimated: scores read the stored estimate artefact
+  and the stored actual row, and the run names the
+  connector batches that delivered the actuals it grades.
+- **Driver-attribution error** — the pack's stated method
+  attributes the total signed error across the estimate's
+  own contribution lines in proportion to each line's
+  signed share of the estimate total, so the attributed
+  errors sum back to the total error and the most-wrong
+  line can be named: this is how the desk learns *which
+  part* of the engine to trust season over season. The
+  attribution matches a hand-computed fixture exactly,
+  in tests and in the eval gate. A zero-total estimate is
+  recorded `not_attributable` rather than divided by
+  zero; a zero actual carries no percentage error and is
+  named `zero_actual`.
+- **Re-performance and refusal** — every score run is an
+  insert-only artefact, re-performed by a second route
+  that re-derives the line deltas from the recorded
+  value-after chain instead of their stated deltas. One
+  mismatch refuses the run wholesale (a refusal artefact
+  is recorded; no score is stored), and a tampered stored
+  run is caught by the same verifier. Unmatched cells are
+  named in **both** directions — actuals with no struck
+  estimate (the R11 report's discipline) and head
+  estimates with no actual on record.
+- **Eval depth** — the gate now grades the full
+  firing/recovery paths of the planted instruments, not
+  just their prints: the DAP spike alert's lifecycle is
+  folded from its acts alone, invalid transitions are
+  refused and record nothing, and a second alert walks
+  open → acknowledged → closed under grading; the
+  planted delay's supply-gap path is re-performed across
+  all six programme months (short while the vessel is
+  slipped, comfortable from the month it lands, cover
+  exact) with the stored gap chain walked as one
+  unbroken line.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -850,6 +897,15 @@ SeaweedFS S3 gateway together.
   profile at full test parity (gap 0) with the production
   smoke — migration 0011, API + CLI surfaces, demo walk,
   tests and eval counters.
+- **Built and gated in R12:** season-close estimate
+  scoring — per-cell error and run bias from the stored
+  artefacts, driver-attribution error under the versioned
+  scoring pack with the most-wrong line named and a
+  hand-computed fixture matched exactly, second-route
+  re-performance with wholesale refusal, unmatched cells
+  named in both directions — plus the spike-lifecycle and
+  delay-gap-path eval depth — migration 0012, API + CLI
+  surfaces, demo walk, tests and eval counters.
 - **Not built yet (on the round map):** the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile

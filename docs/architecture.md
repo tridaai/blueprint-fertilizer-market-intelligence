@@ -322,7 +322,7 @@ those steps; every state transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0011)
+## Data model (migrations 0001–0012)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -479,6 +479,16 @@ corrections are insert-only artefacts; actuals are facts
 under the same insert-only discipline as the 0001 tables,
 in their own table so an actual can never be mistaken for
 — or overwrite — an estimate.
+
+Scoring tables (0012): `estimate_scores` (one row per
+season-close score run: crop year, season, the scoring
+date, the named scorer and the pack version as columns;
+the per-cell errors, driver attributions, summary bias,
+the graded actual batches and both unmatched sets in the
+payload) and `score_refusals` (one row per refused run,
+with its re-performance problems in the payload). Both
+are insert-only; a score is a grading of stored
+artefacts, never an edit of an estimate or an actual.
 
 ## Deployment
 
