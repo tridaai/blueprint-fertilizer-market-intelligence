@@ -370,11 +370,34 @@ those steps; every state transition is a stored artefact.
   a second route over the same record; because folds are by
   date, acts recorded on a later date move the next plan and
   never rewrite a struck one.
+- **Access is a pack, and its decisions are artefacts.** Who
+  may read what is decided by a versioned register of named
+  principals and remits, never by ad-hoc checks at call sites:
+  an unregistered name resolves to the narrowest remit. A
+  scoped read that falls outside the remit returns absence —
+  the record reads exactly as if it did not exist — and every
+  decision, allowed, hidden or refused, is written to an
+  insert-only audit log whose entries are content-addressed
+  and re-decided by the verifier, exports included: the log's
+  export entries must reconcile one-to-one with the export
+  packs in the store.
+- **Collaboration rides the same folds.** An annotation pins
+  itself to its target by hash, and whether the target family
+  has moved on is folded from the supersession links at read
+  time, never stored on the note. A follow-up's state is the
+  fold of its acts and a terminal fold refuses further acts.
+  The publication review queue is an artefact like any other:
+  its membership is the publication fold at its date, its
+  diffs are computed against the family's published head, and
+  each item binds the fingerprint as reviewed so the act that
+  publishes must strike with the same fingerprint — the queue
+  refuses wholesale, with the refusal recorded, when a pending
+  artefact fails its own verifier.
 - **Fail-closed model profiles.** Profile resolution happens at
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0014)
+## Data model (migrations 0001–0015)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -574,6 +597,24 @@ with their figures in the payload). Both artefacts
 are insert-only and supersede by link; territory
 packs ride the existing `export_packs` table under
 the territory pack kind.
+
+Access & collaboration tables (0015): `access_entries`
+(one row per guard decision: the principal, surface,
+target and the artefact's region as columns; the
+decision, remit and pin context in the payload),
+`annotations` (the pinned target's kind and id as
+columns; the pin hash and the note in the payload),
+`followup_tasks` with `followup_acts` (one row per
+act — assign, complete, close — with the actor, the
+act's date, the assignee and the close's stated
+reason as columns), and `review_queues` with
+`review_refusals` (one row per queue or its refusal:
+the strike date, striker and review pack version as
+columns; the membership items with their driver
+summaries, diffs and reviewed fingerprints in the
+payload). All insert-only; a follow-up's state and a
+note's superseded flag exist nowhere as columns —
+they are folds, exactly like an alert's.
 
 ## Deployment
 

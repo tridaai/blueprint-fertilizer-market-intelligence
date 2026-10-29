@@ -857,6 +857,74 @@ and never presents a stale figure as current.
   acts recorded on a later date move the next plan,
   never rewrite this one.
 
+## What Round 15 adds
+
+- **Regional role scopes** (roadmap F21-AS1) —
+  who may read what is a versioned pack
+  (`access_rules`, 2026.10.1): named principals hold
+  a strategy remit (everything), a product remit, a
+  regional remit (one region), or a viewer remit
+  (published material only) — and any name the pack
+  does not register reads as a viewer, so an
+  unregistered name is refused rather than waved
+  through. Through the scoped surfaces a regional
+  reader enumerates only their own region's
+  districts, and a competitor observation outside
+  the reader's remit reads exactly as if it did not
+  exist — absence, never a refusal that proves the
+  record is there. Competitor reads are judged per
+  artefact, region and product remits alike.
+- **The export audit log** (F21-AS1) — every
+  guard decision is itself an insert-only,
+  content-addressed artefact: the principal, the
+  surface, the target, the artefact's own region
+  and product context, the remit the pack judged,
+  the decision and the pack version. Exports are
+  always allowed — any named person may export —
+  and always logged, so what left the building is
+  a fact on record; the graded invariant is that
+  the log's export entries reconcile one-to-one
+  with the export packs in the store, and an
+  independent verifier re-decides every logged
+  entry from the pack as it stands, so a doctored
+  decision is named.
+- **Annotations and assigned follow-ups**
+  (roadmap F21-CA2) — a note can be pinned to a
+  demand estimate, a supply gap or a price alert:
+  an insert-only artefact whose pin is a hash of
+  the target exactly as stored, so a view of the
+  note says plainly whether the target still
+  matches its pin and whether the family has since
+  moved on — the flag is folded from the family's
+  own supersession links, never stored. Follow-ups
+  are tasks struck once against a target, with
+  their state a fold of attributed acts (assign,
+  complete, close with a stated reason): an act
+  against a finished task is refused outright, so
+  a closed item cannot be quietly revived, and the
+  verifier re-performs every pin and fold.
+- **The publication review queue** (roadmap
+  F21-OW4) — one insert-only artefact per review
+  date listing everything awaiting publication with
+  exactly what a reviewer needs to say yes: for an
+  outlook, its totals and the cell-by-cell diff
+  against the family's published head (changed,
+  added and removed cells with their tonnes), for
+  a brief, its figure diff by section and label —
+  or the plain basis "first publication" when
+  nothing has been published yet. Each item binds
+  the artefact's fingerprint as reviewed, so the
+  publication act that follows strikes with that
+  same fingerprint — published equals reviewed,
+  byte for byte. A pending artefact that fails its
+  own verifier refuses the whole queue and the
+  refusal is itself recorded; membership and diffs
+  re-derive by a second route from the raw acts.
+  The R10 publication gate is re-graded by this
+  queue (roadmap F21-CA1): briefs and outlooks
+  alike enter it only while their folded state is
+  draft, and leave it only through the act.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1107,6 +1175,12 @@ src/fertilizer_intelligence/
   scenario.py        scenario forks, planning options, adoptions, verifiers
   brief_rules.py     the versioned brief pack (week + scope rules, sections, pack kinds, badges)
   brief.py           weekly brief, figure verifier, report packs, publication acts + decision log
+  access_rules.py    the versioned access pack (principal register, remit kinds, decisions)
+  access.py          the access guard, scoped reads and the export audit log + verifier
+  notes_rules.py     the versioned notes pack (pin kinds, follow-up acts, close reasons)
+  notes.py           annotations with pins, follow-up task folds and their verifier
+  review_rules.py    the versioned review pack (pending kinds, queue sections)
+  review.py          the publication review queue: membership, cell/figure diffs, verifier
   ingest_rules.py    the versioned ingest pack (source registry, class contracts, quarantine reasons)
   ingest.py          connector loads, batch verifier, corrections + chains, actuals report
   migrations.py      numbered migration runner
@@ -1116,7 +1190,7 @@ src/fertilizer_intelligence/
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0011 in sqlite + postgres dialects
+migrations/          0001-0015 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md
