@@ -39,6 +39,9 @@ DAP_DELAY_MONTHS = {
 }
 
 
+from rawdb import raw_connect
+
+
 def line_of(position, component):
     return next(l for l in position["lines"] if l["component"] == component)
 
@@ -267,7 +270,7 @@ def test_projection_refusals(service):
 def test_position_tamper_is_detected(service, settings):
     position = service.supply_position("DAP", "2025-10", AS_OF)
     assert service.verify_position("DAP", "2025-10") == []
-    db = sqlite3.connect(settings.sqlite_path)
+    db = raw_connect(settings)
     payload = json.loads(
         db.execute(
             "SELECT payload FROM supply_positions WHERE position_id = ?",

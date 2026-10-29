@@ -10,6 +10,8 @@ import pytest
 from fertilizer_intelligence import movements as movement_engine
 from fertilizer_intelligence.movements import AlertStateError
 
+from rawdb import raw_connect  # noqa: E402
+
 AS_OF = "2026-04-15"
 
 # The whole alert set over the planted series, derived by hand
@@ -149,7 +151,7 @@ def test_alert_without_movement_fails_verification(watched, settings):
     """A hand-forged alert row naming a movement that does not
     exist is caught by the verifier — alerts are only real when
     their triggering movements are."""
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     raw.execute(
         "INSERT INTO price_alerts (alert_id, series_kind, item, rule_id, band, "
         "period_month, movement_ids, figures, rules_version, as_of) VALUES "
@@ -167,7 +169,7 @@ def test_tampered_movement_and_alert_are_detected(watched, settings):
         m for m in watched.store.list_movements("product", "DAP") if m["month"] == "2025-09"
     )
     alert = watched.list_alerts("product", "DAP", "spike")[0]
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     raw.execute(
         "UPDATE price_movements SET mom_pct = 3.0 WHERE movement_id = ?",
         (movement["movement_id"],),

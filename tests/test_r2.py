@@ -14,6 +14,9 @@ from fertilizer_intelligence.modelport import ModelReply
 AS_OF = "2026-04-15"
 
 
+from rawdb import raw_connect
+
+
 def _line(estimate, driver):
     return next(c for c in estimate["contributions"] if c["driver"] == driver)
 
@@ -169,7 +172,7 @@ def test_recompute_is_idempotent_then_supersedes_on_new_facts(service, settings)
 
 def test_tampered_artefacts_are_detected(service, settings):
     est = service.estimate_demand("DST-LUD", "DAP", "2025-26", "kharif", AS_OF)
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     raw.execute(
         "UPDATE demand_contributions SET delta_tonnes = delta_tonnes + 50 "
         "WHERE estimate_id = ? AND driver = 'price_elasticity'",

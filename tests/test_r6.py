@@ -31,6 +31,9 @@ AS_OF = "2026-04-15"
 FRESHNESS_DAYS = 200
 
 
+from rawdb import raw_connect
+
+
 def _month_end(month):
     year, mon = int(month[:4]), int(month[5:7])
     if mon == 12:
@@ -383,7 +386,7 @@ def test_movement_reperforms_with_provenance(service):
 def test_share_tamper_is_detected(service, settings):
     share = service.market_share("DST-LUD", "DAP", "2025-26", "kharif")
     assert service.verify_share(share["share_id"]) == []
-    db = sqlite3.connect(settings.sqlite_path)
+    db = raw_connect(settings)
     payload = json.loads(
         db.execute(
             "SELECT payload FROM market_shares WHERE share_id = ?",
@@ -404,7 +407,7 @@ def test_share_tamper_is_detected(service, settings):
 def test_movement_tamper_is_detected(service, settings):
     movement = service.share_movement("DST-LUD", "DAP", "kharif", AS_OF)
     assert service.verify_share_movement(movement["movement_id"]) == []
-    db = sqlite3.connect(settings.sqlite_path)
+    db = raw_connect(settings)
     payload = json.loads(
         db.execute(
             "SELECT payload FROM share_movements WHERE movement_id = ?",

@@ -46,6 +46,9 @@ MIXED_QUESTION = (
 AS_OF = "2026-03-31"
 
 
+from rawdb import raw_connect
+
+
 class _StubPort:
     """A hosted-profile stand-in: returns a fixed reply text."""
 
@@ -259,7 +262,7 @@ def test_dashboard_refused_when_a_figure_cannot_reperform(
 def test_tampered_assembly_is_caught(service, settings):
     spec = service.ask_question(MIXED_QUESTION, "test desk", AS_OF)
     assembly = service.assemble_dashboard(spec["spec_id"], AS_OF)
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     payload = json.loads(raw.execute(
         "SELECT payload FROM dashboard_assemblies WHERE assembly_id = ?",
         (assembly["assembly_id"],),

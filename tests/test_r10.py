@@ -22,8 +22,11 @@ from fertilizer_intelligence.modelport import ModelReply
 WEEK = "2026-03-29"  # a Sunday inside rabi 2025-26
 
 
+from rawdb import raw_connect
+
+
 def _tamper(service, table, key_column, key, mutate):
-    conn = sqlite3.connect(service.settings.sqlite_path)
+    conn = raw_connect(service.settings)
     row = conn.execute(
         f"SELECT payload FROM {table} WHERE {key_column} = ?", (key,)
     ).fetchone()
@@ -170,7 +173,7 @@ def test_tampered_source_artefact_refuses_publication(service):
     outlook_id = brief["sections"][0]["artefact_ids"][0]
     # Corrupt the intermediate: the outlook's stored DAP
     # rollup no longer matches its member estimates.
-    conn = sqlite3.connect(service.settings.sqlite_path)
+    conn = raw_connect(service.settings)
     row = conn.execute(
         "SELECT product_rollups FROM season_outlooks "
         "WHERE outlook_id = ?", (outlook_id,)).fetchone()

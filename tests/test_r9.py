@@ -25,6 +25,9 @@ PROJ_SCOPE = {"product": "DAP", "crop_year": "2025-26",
               "season": "rabi"}
 
 
+from rawdb import raw_connect
+
+
 def _base_estimate(service):
     return service.estimate_demand(
         "DST-LUD", "DAP", "2025-26", "kharif", EST_AS_OF)
@@ -418,7 +421,7 @@ def test_tampered_artefacts_are_caught_by_their_verifiers(service,
     slip = _slip_fork(service)
     options = service.build_planning_options(
         base["projection_id"], [slip["fork_id"]], "tests")
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
 
     payload = json.loads(raw.execute(
         "SELECT payload FROM scenario_forks WHERE fork_id = ?",
@@ -564,7 +567,7 @@ def test_unbadged_scenario_figure_fails_verification(service, settings):
     spec = service.ask_question(
         "show me the monsoon shortfall scenario", "tests", EST_AS_OF)
     assembly = service.assemble_dashboard(spec["spec_id"], EST_AS_OF)
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     payload = json.loads(raw.execute(
         "SELECT payload FROM dashboard_assemblies "
         "WHERE assembly_id = ?", (assembly["assembly_id"],)).fetchone()[0])

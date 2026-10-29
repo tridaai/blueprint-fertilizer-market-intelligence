@@ -45,6 +45,9 @@ HYP_SPEC = {
 }
 
 
+from rawdb import raw_connect
+
+
 def registered(service):
     service.register_policy_events(AS_OF)
     return {e["event_id"]: e for e in service.list_policy_events()}
@@ -324,7 +327,7 @@ def test_registration_tamper_is_detected(service, settings):
     events = registered(service)
     event = events["POL-2025-003"]
     assert service.verify_policy_event(event["registry_id"]) == []
-    db = sqlite3.connect(settings.sqlite_path)
+    db = raw_connect(settings)
     payload = json.loads(
         db.execute(
             "SELECT payload FROM policy_registry_events WHERE registry_id = ?",
@@ -347,7 +350,7 @@ def test_impact_note_tamper_is_detected(service, settings):
     event = events["POL-2025-003"]
     note = service.policy_impact(event["registry_id"], AS_OF)
     assert service.verify_policy_impact(event["registry_id"]) == []
-    db = sqlite3.connect(settings.sqlite_path)
+    db = raw_connect(settings)
     payload = json.loads(
         db.execute(
             "SELECT payload FROM policy_impact_notes WHERE note_id = ?",

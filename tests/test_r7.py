@@ -43,6 +43,9 @@ CAP_UNCAPPED = round(6.0 * CAP_DECAY, 6)       # 5.345394
 CAP_PCT = 1.5                                  # the pack's unverified cap
 
 
+from rawdb import raw_connect
+
+
 def _promote(service):
     return service.promote_planted_field_reports(AS_OF)
 
@@ -302,7 +305,7 @@ def test_field_tamper_is_detected(service, settings):
     service.sync_field_reports([CAP_SUB], CAP_AS_OF)
     assessment = service.field_signal_assessment(
         "DST-LUD", "DAP", "2025-26", "kharif", CAP_AS_OF)
-    raw = sqlite3.connect(settings.sqlite_path)
+    raw = raw_connect(settings)
     payload = json.loads(raw.execute(
         "SELECT payload FROM field_signal_assessments WHERE assessment_id = ?",
         (assessment["assessment_id"],),
