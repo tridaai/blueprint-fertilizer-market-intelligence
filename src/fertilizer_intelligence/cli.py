@@ -51,7 +51,8 @@ def _service(args) -> MarketService:
         "model_profile": "offline",
         "log_level": "WARNING",
     }
-    kwargs["database" + "_url"] = os.environ.get("DATABASE_URL") or None
+    kwargs["database" + "_url"] = (
+        args.database_url or os.environ.get("DATABASE_URL") or None)
     return MarketService(Settings(**kwargs))
 
 
@@ -62,6 +63,10 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--db", default="./data/fert.db",
                         help="SQLite store path (default ./data/fert.db)")
+    parser.add_argument("--database-url", default=None,
+                        help="Postgres store URL (overrides --db; "
+                             "DATABASE_URL is honoured when neither "
+                             "is given)")
     parser.add_argument("--migrations", default="migrations",
                         help="migrations directory (default ./migrations)")
     sub = parser.add_subparsers(dest="command", required=True)

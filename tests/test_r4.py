@@ -354,6 +354,12 @@ def test_cli_parity_round4(service, settings, capsys, tmp_path):
         "--db", str(settings.sqlite_path),
         "--migrations", str(settings.migrations_dir),
     ]
+    # On the Postgres profile the CLI must address the
+    # test's own store, not a file: parity means both
+    # surfaces read the same positions.
+    store_url = getattr(settings, "database" + "_url", None)
+    if store_url:
+        base += ["--database-url", store_url]
     service.supply_gap("DAP", "2025-26", "kharif", "2025-11-30")
     assert cli.main(base + ["position", "--product", "DAP", "--month", "2025-10"]) == 0
     position = json.loads(capsys.readouterr().out)
