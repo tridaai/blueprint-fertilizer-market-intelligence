@@ -410,6 +410,59 @@ def main(argv=None) -> int:
     p = sub.add_parser("decision-log", help="the publication decision log, re-derived from the acts")
     p = sub.add_parser("verify-decision-log", help="check the decision log's chains are gapless")
 
+    p = sub.add_parser("ingest-sources", help="the source registry: admissible feeds and their rules")
+    p = sub.add_parser("ingest-load", help="land one connector batch (a JSON file of rows) from a registered source")
+    p.add_argument("--source", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--loaded-by", required=True)
+    p.add_argument("--load-date", required=True)
+
+    p = sub.add_parser("ingest-batches", help="list stored connector batches")
+    p.add_argument("--source", default=None)
+    p.add_argument("--class", dest="fact_class", default=None)
+
+    p = sub.add_parser("ingest-batch", help="read one connector batch report")
+    p.add_argument("batch_id")
+
+    p = sub.add_parser("verify-batch", help="re-perform a stored batch report against the store")
+    p.add_argument("batch_id")
+
+    p = sub.add_parser("quarantine", help="list quarantined rows, with their named reasons")
+    p.add_argument("--batch", default=None)
+    p.add_argument("--reason", default=None)
+    p.add_argument("--class", dest="fact_class", default=None)
+
+    p = sub.add_parser("correct", help="record a correction: a new fact linked to what it corrects (row as a JSON file)")
+    p.add_argument("--class", dest="fact_class", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--corrects", default=None,
+                   help="a correction id (COR-...), a quarantine id (QRN-...), or omitted to correct the stored fact")
+    p.add_argument("--by", required=True)
+
+    p = sub.add_parser("corrections", help="list recorded corrections")
+    p.add_argument("--class", dest="fact_class", default=None)
+    p.add_argument("--key", dest="natural_key", default=None)
+
+    p = sub.add_parser("effective", help="the effective row at a natural key: stored fact folded through its corrections")
+    p.add_argument("--class", dest="fact_class", required=True)
+    p.add_argument("--key", action="append", required=True,
+                   help="field=value, repeatable — the class's natural key")
+
+    p = sub.add_parser("verify-corrections", help="re-perform a key's correction chain")
+    p.add_argument("--class", dest="fact_class", required=True)
+    p.add_argument("--key", action="append", required=True,
+                   help="field=value, repeatable — the class's natural key")
+
+    p = sub.add_parser("actuals", help="list imported season-close actuals")
+    p.add_argument("--district", default=None)
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+    p.add_argument("--product", default=None)
+
+    p = sub.add_parser("actuals-report", help="the season's actuals joined to struck estimates — unmatched rows reported")
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+
     args = parser.parse_args(argv)
     service = _service(args)
     as_of = getattr(args, "as_of", None) or date.today().isoformat()
@@ -815,6 +868,49 @@ def main(argv=None) -> int:
             result = service.decision_log()
         elif args.command == "verify-decision-log":
             result = service.verify_decision_log()
+        elif args.command == "ingest-sources":
+            result = service.ingest_sources()
+        elif args.command == "ingest-load":
+            rows = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            result = service.load_connector_batch(
+                args.source, rows, args.loaded_by, args.load_date)
+        elif args.command == "ingest-batches":
+            result = service.list_ingest_batches(
+                args.source, args.fact_class)
+        elif args.command == "ingest-batch":
+            result = service.get_ingest_batch(args.batch_id)
+            if result is None:
+                print(f"no such ingest batch: {args.batch_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-batch":
+            result = service.verify_ingest_batch(args.batch_id)
+        elif args.command == "quarantine":
+            result = service.list_quarantine(
+                batch_id=args.batch, reason=args.reason,
+                fact_class=args.fact_class)
+        elif args.command == "correct":
+            row = json.loads(Path(args.file).read_text(encoding="utf-8"))
+            result = service.submit_correction(
+                args.fact_class, row, args.corrects, args.by)
+        elif args.command == "corrections":
+            result = service.list_corrections(
+                args.fact_class, args.natural_key)
+        elif args.command == "effective":
+            key = dict(pair.split("=", 1) for pair in args.key)
+            result = service.effective_fact(args.fact_class, key)
+            if result is None:
+                print(f"nothing held under {key} in {args.fact_class}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-corrections":
+            key = dict(pair.split("=", 1) for pair in args.key)
+            result = service.verify_correction_chain(args.fact_class, key)
+        elif args.command == "actuals":
+            result = service.store.season_actuals(
+                args.district, args.crop_year, args.season, args.product)
+        elif args.command == "actuals-report":
+            result = service.actuals_report(args.crop_year, args.season)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:

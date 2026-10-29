@@ -18,6 +18,8 @@ from . import dashboard as dashboard_engine
 from . import demand as demand_engine
 from . import field as field_engine
 from . import field_rules as field_pack
+from . import ingest as ingest_engine
+from . import ingest_rules as ingest_pack
 from . import movements as movement_engine
 from . import policy as policy_engine
 from . import scenario as scenario_engine
@@ -1592,7 +1594,79 @@ class MarketService:
         return {"acts": len(acts), "verified": not problems,
                 "problems": problems}
 
+    # -- the production data plane (R11) ----------------------
+
+    def ingest_sources(self) -> list[dict]:
+        """The source registry, as data: every admissible
+        feed with its fact class, cadence, owner and
+        freshness rule."""
+        return [
+            {"source_id": source_id, **entry}
+            for source_id, entry in ingest_pack.SOURCES.items()
+        ]
+
+    def load_connector_batch(self, source_id, rows, loaded_by,
+                             load_date) -> dict:
+        """Land one connector batch from a registered
+        source: valid rows insert-only, bad rows quarantine
+        with named reasons, provenance-less rows are refused
+        at the port, and a replay lands nothing twice."""
+        batch = ingest_engine.load_batch(
+            self.store, source_id, rows, loaded_by, load_date)
+        log.info(
+            "connector batch %s: %s received, %s inserted, "
+            "%s duplicates, %s quarantined, %s refused",
+            batch["batch_id"], batch["received"], batch["inserted"],
+            batch["duplicates"], batch["quarantined"], batch["refused"])
+        return batch
+
+    def get_ingest_batch(self, batch_id) -> dict | None:
+        return self.store.get_ingest_batch(batch_id)
+
+    def list_ingest_batches(self, source_id=None, fact_class=None) -> list[dict]:
+        return self.store.list_ingest_batches(source_id, fact_class)
+
+    def verify_ingest_batch(self, batch_id) -> dict:
+        return ingest_engine.verify_batch(self.store, batch_id)
+
+    def list_quarantine(self, batch_id=None, reason=None,
+                        fact_class=None) -> list[dict]:
+        return self.store.list_quarantine_records(
+            batch_id=batch_id, reason=reason, fact_class=fact_class)
+
+    def submit_correction(self, fact_class, row, corrects,
+                          corrected_by) -> dict:
+        correction = ingest_engine.submit_correction(
+            self.store, fact_class, row, corrects, corrected_by)
+        log.info("correction recorded: %s", correction["correction_id"])
+        return correction
+
+    def list_corrections(self, fact_class=None, natural_key=None) -> list[dict]:
+        return self.store.list_fact_corrections(fact_class, natural_key)
+
+    def effective_fact(self, fact_class, key) -> dict | None:
+        if fact_class not in ingest_pack.FACT_CLASSES:
+            raise ValueError(f"unknown fact class: {fact_class}")
+        return ingest_engine.effective_row(self.store, fact_class, key)
+
+    def verify_correction_chain(self, fact_class, key) -> dict:
+        if fact_class not in ingest_pack.FACT_CLASSES:
+            raise ValueError(f"unknown fact class: {fact_class}")
+        return ingest_engine.verify_correction_chain(
+            self.store, fact_class, key)
+
+    def actuals_report(self, crop_year, season) -> dict:
+        """The season-close actuals for one season, joined
+        to struck estimates by natural key — unmatched rows
+        reported, never dropped."""
+        return ingest_engine.actuals_report(self.store, crop_year, season)
+
     def ready(self) -> bool:
+        # Season actuals (R11) are an import class that is
+        # legitimately empty until a season closes, so they
+        # are not part of the dataset-loaded check.
+        counts = self.store.fact_counts()
+        counts.pop("season_actuals", None)
         return self.store.get_manifest() is not None and all(
-            n > 0 for n in self.store.fact_counts().values()
+            n > 0 for n in counts.values()
         )

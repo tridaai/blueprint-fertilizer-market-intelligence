@@ -177,6 +177,25 @@ class PackRequest(BaseModel):
     as_of: str
 
 
+class IngestBatchRequest(BaseModel):
+    source_id: str
+    rows: list[dict]
+    loaded_by: str
+    load_date: str
+
+
+class CorrectionRequest(BaseModel):
+    fact_class: str
+    row: dict
+    corrects: str | None = None
+    corrected_by: str
+
+
+class EffectiveRequest(BaseModel):
+    fact_class: str
+    key: dict
+
+
 class PublicationRequest(BaseModel):
     artefact_kind: str
     artefact_id: str
@@ -1162,6 +1181,98 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/publications/verify")
     def verify_decision_log() -> dict:
         return service.verify_decision_log()
+
+    # -- the production data plane (R11) ----------------------
+
+    @app.get("/ingest/sources")
+    def ingest_sources() -> list[dict]:
+        return service.ingest_sources()
+
+    @app.post("/ingest/batches")
+    def load_connector_batch(body: IngestBatchRequest) -> dict:
+        try:
+            return service.load_connector_batch(
+                body.source_id, body.rows, body.loaded_by,
+                body.load_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/ingest/batches")
+    def list_ingest_batches(
+        source_id: str | None = None, fact_class: str | None = None,
+    ) -> list[dict]:
+        return service.list_ingest_batches(source_id, fact_class)
+
+    @app.get("/ingest/batches/{batch_id}")
+    def get_ingest_batch(batch_id: str) -> dict:
+        batch = service.get_ingest_batch(batch_id)
+        if batch is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such ingest batch: {batch_id}")
+        return batch
+
+    @app.get("/ingest/batches/{batch_id}/verify")
+    def verify_ingest_batch(batch_id: str) -> dict:
+        try:
+            return service.verify_ingest_batch(batch_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/ingest/quarantine")
+    def list_quarantine(
+        batch_id: str | None = None, reason: str | None = None,
+        fact_class: str | None = None,
+    ) -> list[dict]:
+        return service.list_quarantine(batch_id, reason, fact_class)
+
+    @app.post("/ingest/corrections")
+    def submit_correction(body: CorrectionRequest) -> dict:
+        try:
+            return service.submit_correction(
+                body.fact_class, body.row, body.corrects,
+                body.corrected_by)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/ingest/corrections")
+    def list_corrections(
+        fact_class: str | None = None, natural_key: str | None = None,
+    ) -> list[dict]:
+        return service.list_corrections(fact_class, natural_key)
+
+    @app.post("/ingest/effective")
+    def effective_fact(body: EffectiveRequest) -> dict:
+        try:
+            row = service.effective_fact(body.fact_class, body.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"nothing held under {body.key} in "
+                       f"{body.fact_class}")
+        return row
+
+    @app.post("/ingest/corrections/verify")
+    def verify_correction_chain(body: EffectiveRequest) -> dict:
+        try:
+            return service.verify_correction_chain(
+                body.fact_class, body.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/actuals")
+    def list_actuals(
+        district_id: str | None = None, crop_year: str | None = None,
+        season: str | None = None, product: str | None = None,
+    ) -> list[dict]:
+        return service.store.season_actuals(
+            district_id, crop_year, season, product)
+
+    @app.get("/actuals/report")
+    def actuals_report(crop_year: str, season: str) -> dict:
+        return service.actuals_report(crop_year, season)
 
     return app
 
