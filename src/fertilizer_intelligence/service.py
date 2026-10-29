@@ -25,6 +25,8 @@ from . import ingest as ingest_engine
 from . import ingest_rules as ingest_pack
 from . import market_map as map_engine
 from . import movements as movement_engine
+from . import notes as notes_engine
+from . import notes_rules as notes_pack
 from . import policy as policy_engine
 from . import queue as queue_engine
 from . import queue_rules as queue_pack
@@ -2236,6 +2238,117 @@ class MarketService:
         problems = access_engine.verify_access_log(self.store)
         return {"entries": len(entries),
                 "verified": not problems, "problems": problems}
+
+    # -- annotations & follow-ups (R15) -------------------
+
+    def annotate(self, target_kind, target_id, author, at,
+                 text) -> dict:
+        """Pin a named comment to one exact artefact
+        version. The pin binds the target's fingerprint
+        as stored now; the annotation is insert-only and
+        is never moved onto a successor."""
+        if not author or not author.strip():
+            raise ValueError(
+                "an annotation names its author — an "
+                "anonymous comment is refused")
+        if not text or not text.strip():
+            raise ValueError("an annotation says something")
+        artefact = notes_engine.build_annotation(
+            self.store, target_kind, target_id,
+            author.strip(), at, text.strip())
+        existing = self.store.get_annotation(artefact.annotation_id)
+        if existing is not None:
+            return notes_engine.annotation_view(self.store, existing)
+        self.store.insert_annotation(artefact.model_dump())
+        log.info("annotation stored: %s", artefact.annotation_id)
+        return notes_engine.annotation_view(
+            self.store, self.store.get_annotation(
+                artefact.annotation_id))
+
+    def get_annotation(self, annotation_id) -> dict | None:
+        row = self.store.get_annotation(annotation_id)
+        return notes_engine.annotation_view(self.store, row) \
+            if row is not None else None
+
+    def list_annotations(self, target_kind=None, target_id=None,
+                         author=None) -> list[dict]:
+        return [notes_engine.annotation_view(self.store, row)
+                for row in self.store.list_annotations(
+                    target_kind, target_id, author)]
+
+    def create_followup(self, target_kind, target_id, assignee,
+                        created_by, at, text, due=None) -> dict:
+        """Strike one follow-up task against an artefact
+        version, with its first owner named. State from
+        here is a fold of acts, never an edit."""
+        if not assignee or not assignee.strip():
+            raise ValueError(
+                "a follow-up names its owner — an "
+                "unassigned task is refused")
+        if not created_by or not created_by.strip():
+            raise ValueError("a follow-up names who raised it")
+        if not text or not text.strip():
+            raise ValueError("a follow-up says what is owed")
+        artefact = notes_engine.build_task(
+            self.store, target_kind, target_id,
+            assignee.strip(), created_by.strip(), at,
+            text.strip(), due)
+        existing = self.store.get_followup_task(artefact.task_id)
+        if existing is not None:
+            return notes_engine.task_view(self.store, existing)
+        self.store.insert_followup_task(artefact.model_dump())
+        log.info("follow-up stored: %s", artefact.task_id)
+        return notes_engine.task_view(
+            self.store, self.store.get_followup_task(
+                artefact.task_id))
+
+    def record_followup_act(self, task_id, act, actor, at,
+                            assignee=None, reason=None,
+                            note=None) -> dict:
+        """Record one act against a follow-up: assign,
+        complete or close. An act against a task that
+        has reached a terminal state is refused — the
+        fold is closed."""
+        task = self.store.get_followup_task(task_id)
+        if task is None:
+            raise notes_engine.FollowupStateError(
+                f"no such follow-up task: {task_id}")
+        if not actor or not actor.strip():
+            raise ValueError("a follow-up act names its actor")
+        state = notes_engine.derive_state(
+            task, self.store.list_followup_acts(task_id))["state"]
+        if state in notes_pack.TERMINAL_STATES:
+            raise notes_engine.FollowupStateError(
+                f"follow-up {task_id} is {state} — its fold "
+                "is closed to further acts")
+        artefact = notes_engine.build_act(
+            task_id, act, actor.strip(), at, assignee, reason,
+            note)
+        existing = self.store.get_followup_act(artefact.act_id)
+        if existing is not None:
+            return existing
+        self.store.insert_followup_act(artefact.model_dump())
+        log.info("follow-up act recorded: %s", artefact.act_id)
+        return self.store.get_followup_act(artefact.act_id)
+
+    def get_followup(self, task_id) -> dict | None:
+        row = self.store.get_followup_task(task_id)
+        return notes_engine.task_view(self.store, row) \
+            if row is not None else None
+
+    def list_followups(self, target_kind=None, target_id=None,
+                       assignee=None) -> list[dict]:
+        return [notes_engine.task_view(self.store, row)
+                for row in self.store.list_followup_tasks(
+                    target_kind, target_id, assignee)]
+
+    def verify_notes(self) -> dict:
+        problems = notes_engine.verify_notes(self.store)
+        return {
+            "annotations": len(self.store.list_annotations()),
+            "tasks": len(self.store.list_followup_tasks()),
+            "acts": len(self.store.list_followup_acts()),
+            "verified": not problems, "problems": problems}
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is
