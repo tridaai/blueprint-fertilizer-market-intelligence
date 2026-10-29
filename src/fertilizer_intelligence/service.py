@@ -31,6 +31,7 @@ from . import policy as policy_engine
 from . import queue as queue_engine
 from . import queue_rules as queue_pack
 from . import readiness as readiness_engine
+from . import review as review_engine
 from . import rollups as rollup_engine
 from . import scenario as scenario_engine
 from . import scoring as scoring_engine
@@ -2349,6 +2350,65 @@ class MarketService:
             "tasks": len(self.store.list_followup_tasks()),
             "acts": len(self.store.list_followup_acts()),
             "verified": not problems, "problems": problems}
+
+    # -- the publication review queue (R15) -----------
+
+    def publication_review_queue(self, struck_by, as_of) -> dict:
+        """Strike the review queue at a date: every
+        outlook and brief in draft state, each with its
+        driver summary, its diff against the family's
+        published head, and the fingerprint a
+        publication act would bind. A pending artefact
+        that fails its own verifier refuses the whole
+        queue and records a refusal artefact.
+        Compute-or-return: an unchanged record returns
+        the stored queue; a moved record supersedes by
+        link."""
+        if not struck_by or not struck_by.strip():
+            raise ValueError(
+                "a review queue names who struck it — an "
+                "unnamed strike is refused")
+        candidate, problems = review_engine.build_queue(
+            self.store, struck_by.strip(), as_of)
+        if problems:
+            refusal = review_engine.build_refusal(
+                as_of, struck_by.strip(), problems)
+            if self.store.get_review_refusal(
+                    refusal.refusal_id) is None:
+                self.store.insert_review_refusal(
+                    refusal.model_dump())
+            raise review_engine.ReviewRefused(
+                problems, refusal.refusal_id)
+        existing = self.store.get_review_queue(candidate.queue_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_review_queues(), "queue_id")
+        if head is not None and head["as_of"] == as_of \
+                and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["queue_id"] if head else None})
+        self.store.insert_review_queue(candidate.model_dump())
+        log.info("review queue stored: %s", candidate.queue_id)
+        return self.store.get_review_queue(candidate.queue_id)
+
+    def get_review_queue(self, queue_id) -> dict | None:
+        return self.store.get_review_queue(queue_id)
+
+    def list_review_queues(self) -> list[dict]:
+        return self.store.list_review_queues()
+
+    def verify_review_queue(self, queue_id) -> dict:
+        row = self.store.get_review_queue(queue_id)
+        if row is None:
+            raise ValueError(f"no such review queue: {queue_id}")
+        problems = review_engine.verify_queue(self.store, row)
+        return {"queue_id": queue_id, "verified": not problems,
+                "problems": problems}
+
+    def list_review_refusals(self) -> list[dict]:
+        return self.store.list_review_refusals()
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is
