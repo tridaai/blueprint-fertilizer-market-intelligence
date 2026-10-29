@@ -24,6 +24,8 @@ from .logging_config import configure_logging, new_request_id, request_id_var
 from .market_map import MapRefused
 from .movements import AlertStateError
 from .queue import QueueStateError
+from .readiness import ReadinessRefused
+from .rollups import RollupRefused
 from .scoring import ScoringRefused
 from .service import MarketService
 
@@ -193,6 +195,21 @@ class BoardRequest(BaseModel):
     crop_year: str
     season: str
     built_by: str
+    as_of: str
+
+
+class RollupRequest(BaseModel):
+    crop_year: str
+    season: str
+    built_by: str
+    as_of: str
+
+
+class ReadinessRequest(BaseModel):
+    region: str
+    crop_year: str
+    season: str
+    struck_by: str
     as_of: str
 
 
@@ -1481,6 +1498,93 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # -- regional rollups & season readiness (R14) ------------
+
+    @app.post("/rollups")
+    def build_rollup(body: RollupRequest) -> dict:
+        try:
+            return service.regional_rollup(
+                body.crop_year, body.season, body.built_by, body.as_of)
+        except RollupRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/rollups")
+    def list_rollups(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_rollups(crop_year, season)
+
+    @app.get("/rollups/{rollup_id}")
+    def get_rollup(rollup_id: str) -> dict:
+        rollup = service.get_rollup(rollup_id)
+        if rollup is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such regional rollup: {rollup_id}")
+        return rollup
+
+    @app.get("/rollups/{rollup_id}/verify")
+    def verify_rollup(rollup_id: str) -> dict:
+        try:
+            return service.verify_rollup(rollup_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/rollup-refusals")
+    def list_rollup_refusals(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_rollup_refusals(crop_year, season)
+
+    @app.post("/readiness")
+    def build_readiness(body: ReadinessRequest) -> dict:
+        try:
+            return service.season_readiness(
+                body.region, body.crop_year, body.season,
+                body.struck_by, body.as_of)
+        except ReadinessRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/readiness")
+    def list_readiness(
+        region: str | None = None, crop_year: str | None = None,
+        season: str | None = None,
+    ) -> list[dict]:
+        return service.list_readiness(region, crop_year, season)
+
+    @app.get("/readiness/{readiness_id}")
+    def get_readiness(readiness_id: str) -> dict:
+        plan = service.get_readiness(readiness_id)
+        if plan is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such readiness plan: {readiness_id}")
+        return plan
+
+    @app.get("/readiness/{readiness_id}/verify")
+    def verify_readiness(readiness_id: str) -> dict:
+        try:
+            return service.verify_readiness(readiness_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/readiness-refusals")
+    def list_readiness_refusals(
+        region: str | None = None, crop_year: str | None = None,
+        season: str | None = None,
+    ) -> list[dict]:
+        return service.list_readiness_refusals(region, crop_year, season)
 
     return app
 

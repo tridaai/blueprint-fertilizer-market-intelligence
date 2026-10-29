@@ -36,6 +36,8 @@ from .board import BoardRefused
 from .brief import BriefRefused
 from .market_map import MapRefused
 from .queue import QueueStateError
+from .readiness import ReadinessRefused
+from .rollups import RollupRefused
 from .scoring import ScoringRefused
 from .config import Settings
 from .demand import NarrativeRefused
@@ -482,8 +484,51 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-queue", help="re-derive the queue's membership and folds")
     p.add_argument("--as-of", required=True)
 
-    p = sub.add_parser("pack", help="export a product or region report pack")
-    p.add_argument("--kind", required=True, choices=["product", "region"])
+    p = sub.add_parser("rollup", help="build (or return) the regional rollup for a season")
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("rollups", help="list stored regional rollups")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("get-rollup", help="read one regional rollup")
+    p.add_argument("rollup_id")
+
+    p = sub.add_parser("verify-rollup", help="re-perform a rollup against its member estimates")
+    p.add_argument("rollup_id")
+
+    p = sub.add_parser("rollup-refusals", help="list recorded rollup refusals")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("readiness", help="strike (or return) a region's season readiness plan")
+    p.add_argument("--region", required=True)
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("readiness-list", help="list stored readiness plans")
+    p.add_argument("--region", default=None)
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("get-readiness", help="read one readiness plan")
+    p.add_argument("readiness_id")
+
+    p = sub.add_parser("verify-readiness", help="re-derive every line of a stored readiness plan")
+    p.add_argument("readiness_id")
+
+    p = sub.add_parser("readiness-refusals", help="list recorded readiness refusals")
+    p.add_argument("--region", default=None)
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("pack", help="export a product, region or territory report pack")
+    p.add_argument("--kind", required=True, choices=["product", "region", "territory"])
     p.add_argument("--key", required=True)
     p.add_argument("--by", required=True)
     p.add_argument("--as-of", default=None)
@@ -1022,6 +1067,32 @@ def main(argv=None) -> int:
                 fork_id=args.fork_id, note=args.note)
         elif args.command == "verify-queue":
             result = service.verify_queue(args.as_of)
+        elif args.command == "rollup":
+            result = service.regional_rollup(
+                args.crop_year, args.season, args.by, args.as_of)
+        elif args.command == "rollups":
+            result = service.list_rollups(args.crop_year, args.season)
+        elif args.command == "get-rollup":
+            result = service.get_rollup(args.rollup_id)
+        elif args.command == "verify-rollup":
+            result = service.verify_rollup(args.rollup_id)
+        elif args.command == "rollup-refusals":
+            result = service.list_rollup_refusals(
+                args.crop_year, args.season)
+        elif args.command == "readiness":
+            result = service.season_readiness(
+                args.region, args.crop_year, args.season, args.by,
+                args.as_of)
+        elif args.command == "readiness-list":
+            result = service.list_readiness(
+                args.region, args.crop_year, args.season)
+        elif args.command == "get-readiness":
+            result = service.get_readiness(args.readiness_id)
+        elif args.command == "verify-readiness":
+            result = service.verify_readiness(args.readiness_id)
+        elif args.command == "readiness-refusals":
+            result = service.list_readiness_refusals(
+                args.region, args.crop_year, args.season)
         elif args.command == "pack":
             result = service.export_pack(
                 args.kind, args.key, args.by, as_of)
@@ -1104,6 +1175,16 @@ def main(argv=None) -> int:
             indent=2), file=sys.stderr)
         return 2
     except BoardRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except RollupRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except ReadinessRefused as exc:
         print(json.dumps(
             {"refused": exc.problems, "refusal_id": exc.refusal_id},
             indent=2), file=sys.stderr)

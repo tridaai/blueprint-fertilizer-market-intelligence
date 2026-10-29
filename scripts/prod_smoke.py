@@ -68,7 +68,7 @@ def main() -> int:
         applied = store._rows(
             "SELECT version FROM schema_migrations ORDER BY version")
         versions = [row["version"] for row in applied]
-        expected = [f"{n:04d}" for n in range(1, 14)]
+        expected = [f"{n:04d}" for n in range(1, 15)]
         if versions != expected:
             problems.append(
                 f"migrations applied: {versions}, expected {expected}")

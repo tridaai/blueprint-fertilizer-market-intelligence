@@ -913,6 +913,96 @@ def collect_region_pack(service, region: str, as_of: str):
     return tables, appendix
 
 
+def collect_territory_pack(service, region: str, as_of: str):
+    """One region's territory pack tables, rendered from
+    the regional rollup artefact for the season in scope
+    at the pack's as-of: the region's member lines, every
+    region subtotal beside the national totals, and the
+    gap positions the rollup carries by reference. Every
+    figure in the pack is the rollup's figure — the pack
+    collects no number of its own."""
+    store = service.store
+    crop_year = CROP_YEARS[-1]
+    scope = pack.season_scope_for_month(as_of[:7])
+    season = scope["season"]
+    districts = [d for d in store.list_districts()
+                 if d["region"] == region]
+    if not districts:
+        raise ValueError(
+            f"no tracked district sits in region {region!r} — the "
+            f"tracked regions are "
+            f"{sorted({d['region'] for d in store.list_districts()})}")
+    rollup = service.regional_rollup(
+        crop_year, season, "territory pack", as_of)
+    tables: dict[str, list[dict]] = {name: [] for name
+                                     in pack.PACK_TABLES[pack.PACK_TERRITORY]}
+    appendix: list[dict] = []
+    for block in rollup["products"]:
+        product = block["product"]
+        for region_row in block["regions"]:
+            tables["rollup"].append({
+                "product": product, "level": "region",
+                "region": region_row["region"],
+                "rollup_id": rollup["rollup_id"],
+                "total_tonnes": region_row["total_tonnes"],
+                "estimate_count": region_row["estimate_count"],
+                "partial_count": region_row["partial_count"],
+                "status": region_row["status"],
+            })
+        tables["rollup"].append({
+            "product": product, "level": "national",
+            "region": "all", "rollup_id": rollup["rollup_id"],
+            "total_tonnes": block["national_tonnes"],
+            "estimate_count": block["estimate_count"],
+            "partial_count": block["partial_count"],
+            "status": block["status"],
+        })
+        appendix.append(_appendix_entry(
+            "rollup",
+            f"{product} region and national rollups, "
+            f"{season} {crop_year}",
+            rollup["rollup_id"], rollup["as_of"],
+            "the regional rollup artefact for the season"))
+        for member in block["members"]:
+            if member["region"] != region:
+                continue
+            tables["districts"].append({
+                "product": product,
+                "district_id": member["district_id"],
+                "district_name": member["district_name"],
+                "region": member["region"],
+                "estimate_id": member["estimate_id"],
+                "status": member["status"],
+                "total_tonnes": member["total_tonnes"],
+            })
+            appendix.append(_appendix_entry(
+                "districts",
+                f"{member['district_name']} {product} {season} "
+                f"{crop_year} demand",
+                member["estimate_id"], member["as_of"],
+                "member estimate of the rollup, in this "
+                "territory"))
+        gap = block["gap"]
+        if gap is not None:
+            tables["gaps"].append({
+                "product": product, "gap_id": gap["gap_id"],
+                "band": gap["band"],
+                "gap_tonnes": gap["gap_tonnes"],
+                "gap_pct_of_demand": gap["gap_pct_of_demand"],
+                "programme_cover_pct": gap["programme_cover_pct"],
+                "demand_tonnes": gap["demand_tonnes"],
+                "demand_basis": gap["demand_basis"],
+            })
+            appendix.append(_appendix_entry(
+                "gaps",
+                f"{product} {season} {crop_year} supply gap "
+                "position",
+                gap["gap_id"], gap["as_of"],
+                "head supply gap, carried by the rollup by "
+                "reference"))
+    return tables, appendix
+
+
 def build_pack(pack_kind: str, pack_key: str, as_of: str,
                exported_by: str, tables: dict,
                appendix: list[dict]) -> ExportPack:

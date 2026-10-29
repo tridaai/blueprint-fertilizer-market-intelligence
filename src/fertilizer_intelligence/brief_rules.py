@@ -195,7 +195,13 @@ ALERT_HEADLINE_KEYS = ["mom_pct", "baseline_pct", "cumulative_pct"]
 
 PACK_PRODUCT = "product"
 PACK_REGION = "region"
-PACK_KINDS = [PACK_PRODUCT, PACK_REGION]
+# The territory pack (R14) is rendered from the regional
+# rollup artefact: its tables state the rollup's figures
+# for one region — the region's member lines, its region
+# subtotals beside the national totals, and the product
+# gap positions the rollup carries by reference.
+PACK_TERRITORY = "territory"
+PACK_KINDS = [PACK_PRODUCT, PACK_REGION, PACK_TERRITORY]
 
 PACK_TABLES = {
     PACK_PRODUCT: {
@@ -215,6 +221,17 @@ PACK_TABLES = {
         "shares": ["district_id", "district_name", "product",
                    "share_id", "status",
                    "kaveri_headline_pct", "headline_note", "as_of"],
+    },
+    PACK_TERRITORY: {
+        "rollup": ["product", "level", "region", "rollup_id",
+                   "total_tonnes", "estimate_count",
+                   "partial_count", "status"],
+        "districts": ["product", "district_id", "district_name",
+                      "region", "estimate_id", "status",
+                      "total_tonnes"],
+        "gaps": ["product", "gap_id", "band", "gap_tonnes",
+                 "gap_pct_of_demand", "programme_cover_pct",
+                 "demand_tonnes", "demand_basis"],
     },
 }
 
