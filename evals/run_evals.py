@@ -2208,7 +2208,219 @@ def main() -> int:
                 g["gap_id"] for g in path12):
         counters["delay_gap_path_errors"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12 evals — fertilizer market intelligence")
+    # --- Round 13: the map, the board, the queue -----------
+    # The season's map is struck and every cell checked
+    # against the artefacts it binds, derived here from the
+    # store's rows; the signal layer's classes are folded
+    # independently from the reports and their acts; the
+    # board's lanes are compared against memberships derived
+    # from the alert folds, the map cells, the share heads
+    # and the publication acts; and the queue's membership
+    # is compared against the non-comfortable gap heads
+    # derived from the gap rows alone.
+    counters.setdefault("map_cell_mismatches", 0)
+    counters.setdefault("map_layer_separation_errors", 0)
+    counters.setdefault("board_membership_errors", 0)
+    counters.setdefault("queue_completeness_errors", 0)
+    counters.setdefault("queue_act_errors", 0)
+
+    map13 = service.market_map("2025-26", "kharif", "eval desk",
+                               "2026-03-01")
+    if not service.verify_map(map13["map_id"])["verified"]:
+        counters["map_cell_mismatches"] += 1
+    if len(map13["cells"]) != 72:
+        counters["map_cell_mismatches"] += 1
+
+    def _head13(rows, id_key):
+        superseded = {r["supersedes"] for r in rows if r.get("supersedes")}
+        heads = [r for r in rows if r[id_key] not in superseded]
+        return heads[0] if heads else None
+
+    estimates13 = store.list_estimates(crop_year="2025-26",
+                                       season="kharif")
+    head_estimates13 = {}
+    for row13 in estimates13:
+        head_estimates13.setdefault(
+            (row13["district_id"], row13["product"]), []).append(row13)
+    head_estimates13 = {
+        key: _head13(rows, "estimate_id")
+        for key, rows in head_estimates13.items()}
+    partial13 = 0
+    for cell13 in map13["cells"]:
+        head13 = head_estimates13.get(
+            (cell13["district_id"], cell13["product"]))
+        if head13 is None:
+            if cell13["data_state"] != "no_data":
+                counters["map_cell_mismatches"] += 1
+            continue
+        if cell13["estimate_id"] != head13["estimate_id"] \
+                or cell13["demand_tonnes"] != head13["total_tonnes"]:
+            counters["map_cell_mismatches"] += 1
+        if head13["status"] == "partial":
+            partial13 += 1
+            if cell13["data_state"] != "partial" \
+                    or cell13["missing_drivers"] != list(
+                        head13["missing_drivers"]):
+                counters["map_cell_mismatches"] += 1
+        gap13 = service.get_gap(cell13["product"], "2025-26", "kharif")
+        if gap13 is not None and cell13["gap_id"] != gap13["gap_id"]:
+            counters["map_cell_mismatches"] += 1
+    if sum(1 for c in map13["cells"] if c["data_state"] == "partial") \
+            != partial13:
+        counters["map_cell_mismatches"] += 1
+    mop13 = next(c for c in map13["cells"]
+                 if c["product"] == "MOP"
+                 and c["district_id"] == "DST-LUD")
+    if mop13["product_gap_band"] != "short" \
+            or mop13["district_gap_band"] != "short":
+        counters["map_cell_mismatches"] += 1
+    for entry13 in map13["monsoon"]:
+        facts13 = store.monsoon_facts(entry13["district_id"],
+                                      "2025-26", "kharif")
+        if not facts13 or entry13["deviation_pct"] != max(
+                facts13, key=lambda f: f["as_of"])["deviation_pct"]:
+            counters["map_cell_mismatches"] += 1
+
+    # The signal layer, folded independently: a report's
+    # class is its review state at the map's date, from its
+    # acts alone.
+    def _fold_field13(acts, as_of):
+        acts = [a for a in acts if a["as_of"] <= as_of]
+        if any(a["act"] == "reject" for a in acts):
+            return "rejected"
+        if not acts:
+            return "unreviewed"
+        return "confirmed" if acts[-1]["act"] == "confirm" else "queried"
+
+    for cell13 in map13["cells"]:
+        signals13 = cell13["signals"]
+        ids_confirmed = {e["report_id"] for e in signals13["confirmed"]}
+        ids_pending = {e["report_id"] for e in signals13["pending"]}
+        if ids_confirmed & ids_pending:
+            counters["map_layer_separation_errors"] += 1
+        expected_confirmed, expected_pending, expected_rejected = \
+            set(), set(), 0
+        for report13 in store.list_field_report_artefacts(
+                district_id=cell13["district_id"],
+                product=cell13["product"]):
+            if report13.get("crop_year") != "2025-26" \
+                    or report13.get("season") != "kharif" \
+                    or report13["as_of"] > "2026-03-01":
+                continue
+            state13 = _fold_field13(
+                store.list_field_review_acts(report13["report_id"]),
+                "2026-03-01")
+            if state13 == "confirmed":
+                expected_confirmed.add(report13["report_id"])
+            elif state13 == "rejected":
+                expected_rejected += 1
+            else:
+                expected_pending.add(report13["report_id"])
+        if ids_confirmed != expected_confirmed \
+                or ids_pending != expected_pending \
+                or signals13["rejected_count"] != expected_rejected:
+            counters["map_layer_separation_errors"] += 1
+
+    board13 = service.morning_board("regional_head", "2025-26",
+                                    "kharif", "eval desk", "2026-03-01")
+    if not service.verify_board(board13["board_id"])["verified"]:
+        counters["board_membership_errors"] += 1
+    lanes13 = {lane["lane"]: lane["rows"] for lane in board13["lanes"]}
+
+    def _fold_alert13(acts, as_of):
+        state = "open"
+        for act in acts:
+            if act["as_of"] > as_of:
+                continue
+            if act["act"] == "acknowledge":
+                state = "acknowledged"
+            elif act["act"] == "close":
+                state = "closed"
+        return state
+
+    expected_open13 = {
+        a["alert_id"] for a in store.list_alerts()
+        if _fold_alert13(store.list_alert_acts(a["alert_id"]),
+                         "2026-03-01") == "open"}
+    if {r["alert_id"] for r in lanes13["open_alerts"]} != expected_open13:
+        counters["board_membership_errors"] += 1
+    spike13 = next(a for a in store.list_alerts()
+                   if a["rule_id"] == "spike")
+    if _fold_alert13(store.list_alert_acts(spike13["alert_id"]),
+                     "2026-03-01") == "open" and spike13["alert_id"] \
+            not in {r["alert_id"] for r in lanes13["open_alerts"]}:
+        counters["board_membership_errors"] += 1
+    expected_short13 = {
+        (c["district_id"], c["product"]) for c in map13["cells"]
+        if c["district_gap_band"] in ("tight", "short")}
+    if {(r["district_id"], r["product"])
+            for r in lanes13["districts_trending_short"]} \
+            != expected_short13:
+        counters["board_membership_errors"] += 1
+    if ("DST-RAJ", "MOP") not in {
+            (r["district_id"], r["product"])
+            for r in lanes13["districts_trending_short"]}:
+        counters["board_membership_errors"] += 1
+    published13 = {
+        a["artefact_id"] for a in store.list_publication_acts()
+        if a["artefact_kind"] == "weekly_brief"}
+    expected_pending13 = {
+        b["brief_id"] for b in store.list_weekly_briefs()
+        if b["brief_id"] not in published13}
+    if {r["brief_id"]
+            for r in lanes13["pending_brief_approvals"]} \
+            != expected_pending13:
+        counters["board_membership_errors"] += 1
+
+    queue13 = service.gap_queue("2026-03-01")
+    families13 = {}
+    for product13 in ("UREA", "DAP", "NPK_10_26_26", "MOP",
+                      "GLYPHOSATE", "CHLORPYRIFOS"):
+        for gap13 in store.list_gaps(product13):
+            families13.setdefault(
+                (gap13["product"], gap13["crop_year"], gap13["season"]),
+                []).append(gap13)
+    expected_members13 = {
+        _head13(rows, "gap_id")["gap_id"]
+        for rows in families13.values()
+        if _head13(rows, "gap_id") is not None
+        and _head13(rows, "gap_id")["band"] != "comfortable"}
+    if {v["gap_id"] for v in queue13} != expected_members13:
+        counters["queue_completeness_errors"] += 1
+    mop_gap13 = service.get_gap("MOP", "2025-26", "kharif")
+    mop_item13 = next(
+        (v for v in queue13 if v["gap_id"] == mop_gap13["gap_id"]), None)
+    if mop_item13 is None or mop_item13["band"] != "short" \
+            or not mop_item13["owner"]:
+        counters["queue_completeness_errors"] += 1
+    if not service.verify_queue("2026-03-01")["verified"]:
+        counters["queue_completeness_errors"] += 1
+    if mop_item13 is not None:
+        try:
+            service.close_queue_item(
+                mop_item13["item_id"], "eval desk", "not_a_reason",
+                "2026-03-02")
+            counters["queue_act_errors"] += 1  # accepted!
+        except ValueError:
+            pass
+        if service.queue_item(mop_item13["item_id"],
+                              "2026-03-02")["state"] == "closed":
+            counters["queue_act_errors"] += 1
+        assigned13 = service.assign_queue_item(
+            mop_item13["item_id"], "eval desk", "Eval Assignee",
+            "2026-03-02")
+        if assigned13["owner"] != "Eval Assignee":
+            counters["queue_act_errors"] += 1
+        closed13 = service.close_queue_item(
+            mop_item13["item_id"], "eval desk", "risk_accepted",
+            "2026-03-03")
+        if closed13["state"] != "closed" \
+                or closed13["due_state"] != "closed":
+            counters["queue_act_errors"] += 1
+        if not service.verify_queue("2026-03-03")["verified"]:
+            counters["queue_act_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]

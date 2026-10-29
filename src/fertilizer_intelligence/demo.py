@@ -816,6 +816,90 @@ def main() -> int:
           f"unmatched on the run's face: "
           f"{prior_run['unmatched_actuals']}")
 
+    print("\n--- Round 13: the map, the morning board, the queue ---")
+    reports = service.list_field_reports()
+    unreviewed = [r for r in reports
+                  if r["review_state"] == "unreviewed"]
+    target = unreviewed[0] if unreviewed else (
+        reports[0] if reports else None)
+    if unreviewed:
+        service.review_field_report(
+            target["report_id"], "confirm", "demo reviewer",
+            "corroborated", "2026-04-20")
+        print(f"  one unreviewed field report "
+              f"({target['report_id']}) is confirmed by a named "
+              f"reviewer; the map's signal layer keeps it apart "
+              f"from the reports still awaiting review.")
+    market_map = service.market_map(
+        "2025-26", "kharif", "demo desk", "2026-04-20")
+    mop_short = [c for c in market_map["cells"]
+                 if c["product"] == "MOP"
+                 and c["district_gap_band"] == "short"]
+    print(f"  the district map ({market_map['map_id']}): "
+          f"{len(market_map['cells'])} cells composed from "
+          f"artefact heads; MOP reads short in "
+          f"{len(mop_short)} of 12 districts on its level gap "
+          f"({mop_short[0]['gap_pct_of_demand']}% of demand) — "
+          f"the import-only product whose tracked consumption "
+          f"outruns its arrivals.")
+    gly = next(c for c in market_map["cells"]
+               if c["product"] == "GLYPHOSATE"
+               and c["district_id"] == "DST-LUD")
+    print(f"  glyphosate has no supply side, so its tiles "
+          f"carry no product gap — Ludhiana's gap reading "
+          f"comes from its own field signals alone "
+          f"({gly['district_gap_basis']}), and the cell says "
+          f"so on its face.")
+    if target is not None:
+        cell = next(c for c in market_map["cells"]
+                    if c["district_id"] == target["district_id"]
+                    and c["product"] == target["product"])
+        signals = cell["signals"]
+        print(f"  the signal layer for "
+              f"{cell['district_name']}/{target['product']}: "
+              f"{len(signals['confirmed'])} confirmed, "
+              f"{len(signals['pending'])} pending — confirmed "
+              f"evidence is never merged with the unreviewed "
+              f"reports beside it.")
+    print(f"  the map re-performs cell for cell: "
+          f"{service.verify_map(market_map['map_id'])['verified']}.")
+
+    board = service.morning_board(
+        "regional_head", "2025-26", "kharif", "demo desk",
+        "2026-04-20")
+    lanes = {lane["lane"]: lane["rows"] for lane in board["lanes"]}
+    print(f"  the regional head's morning board "
+          f"({board['board_id']}): "
+          f"{len(lanes['open_alerts'])} open alerts, "
+          f"{len(lanes['districts_trending_short'])} district "
+          f"rows trending short, {len(lanes['stale_figures'])} "
+          f"stale share figures, "
+          f"{len(lanes['pending_brief_approvals'])} brief "
+          f"approvals pending — every lane ranked by its "
+          f"pack, not by recency.")
+    print(f"  the board re-derives lane for lane: "
+          f"{service.verify_board(board['board_id'])['verified']}.")
+
+    queue = service.gap_queue("2026-04-20")
+    print(f"  the gap action queue holds {len(queue)} "
+          f"item(s) — exactly the non-comfortable gap heads:")
+    for view in queue:
+        print(f"    {view['product']} {view['season']} "
+              f"{view['crop_year']}: {view['band']}, owned by "
+              f"{view['owner']}, due {view['due_date']} "
+              f"({view['due_state']}) — {view['item_id']}")
+    if queue:
+        item = queue[0]
+        view = service.assign_queue_item(
+            item["item_id"], "demo duty manager",
+            "Demo Assignee — supply desk", "2026-04-21")
+        print(f"  an assign act moves the first item to "
+              f"{view['owner']}; its state is still "
+              f"{view['state']} — ownership is a fold of "
+              f"acts, not a field someone edits.")
+    print(f"  the queue re-derives end to end: "
+          f"{service.verify_queue('2026-04-21')['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
