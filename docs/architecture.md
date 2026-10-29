@@ -322,7 +322,7 @@ those steps; every state transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0010)
+## Data model (migrations 0001–0011)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -460,6 +460,26 @@ four are insert-only; a brief's publication state is the
 fold of the acts that name it, and a family's current
 published artefact is its head act's target.
 
+Data-plane tables (0011): `ingest_batches` (one row per
+connector load: source, fact class, loader, load date and
+the reconciled counts as columns; the inserted keys and
+rows, the quarantine summary and the port refusals in the
+payload), `quarantine_records` (one row per held row: the
+batch, the named reason and the natural-key label as
+columns; the detail and the raw row in the payload),
+`fact_corrections` (one row per correction: the fact
+class, the natural-key label, the `corrects` link, the
+named corrector, a `supersedes` chain link and the content
+fingerprint as columns; the full corrected row in the
+payload), and `season_actuals` (the season-close actuals
+fact class: district, crop year, season, product, actual
+kind and tonnage with provenance at the row level, keyed
+by its natural key). Batches, quarantine records and
+corrections are insert-only artefacts; actuals are facts
+under the same insert-only discipline as the 0001 tables,
+in their own table so an actual can never be mistaken for
+— or overwrite — an estimate.
+
 ## Deployment
 
 Multi-stage Dockerfile, non-root runtime user, port 8000. Compose
@@ -467,3 +487,12 @@ brings up the agent, Postgres 16 (pgvector image, ahead of the
 retrieval rounds) and SeaweedFS as the S3-compatible object store
 under the service name `minio`. Configuration is environment-only;
 see `.env.example`.
+
+The Postgres profile is a tested profile, not a hope: the full
+test suite runs against Postgres 16 with per-test schema
+isolation and must match the SQLite pass count exactly (parity
+gap 0), and `scripts/prod_smoke.py` (`make smoke`, needs
+`DATABASE_URL`) proves a fresh deployment end to end —
+migrations on a clean schema, dataset load with zero provenance
+gaps, health/readiness, and a connector batch whose replay
+lands nothing twice.

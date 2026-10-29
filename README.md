@@ -620,6 +620,61 @@ and never presents a stale figure as current.
   unpublished brief carries the draft mark, never the
   published one.
 
+## What Round 11 adds
+
+- **The connector framework + source registry** — facts now
+  enter from real feeds through one port, under the
+  versioned ingest pack. The registry states every
+  admissible source — the international price feed, plant
+  production returns, port import manifests, gazette
+  policy notices, dealer competitor returns, state
+  dispatch returns — with the fact class it may deliver,
+  the provenance string its rows must carry, its cadence,
+  its owner and its freshness rule. A batch naming an
+  unregistered source is refused before a single row is
+  read. **A row without `source` or `as_of` is refused at
+  the port** — recorded on the batch report, never stored:
+  provenance is mandatory in the models and NOT NULL in
+  the schema, so the refusal is structural. Every batch
+  report reconciles exactly (received = inserted +
+  duplicates + quarantined + refused) and re-performs
+  against the store under its verifier.
+- **Idempotent replay** — replaying the same batch returns
+  the stored report and lands nothing; the same rows in a
+  later batch count as duplicates, row by row. A different
+  row under a taken natural key is never an overwrite: it
+  quarantines as a conflict.
+- **Quarantine & corrections** — a provenanced row that is
+  malformed or contradictory (a district that does not
+  exist, a negative tonnage, an untracked product, a
+  stale or future `as_of`, another feed's provenance) is
+  held in quarantine with its named reason and raw
+  payload; it never reaches a fact table, so no engine can
+  consume it. **Corrections are new facts**: a correction
+  carries the full corrected row and names what it
+  corrects — a stored fact, a quarantined record, or the
+  head of the key's correction chain. The stored fact is
+  never rewritten; the effective row is the fold of the
+  chain, and the chain verifier re-performs the fold,
+  recomputes every link's fingerprint, and catches
+  tampering.
+- **Season-close actuals** — realized consumption and
+  dispatch import through the same connector path as a
+  **distinct fact class** (`season_actuals`): actuals
+  never overwrite an estimate and never land in another
+  class's table. The actuals report joins them to struck
+  estimates by natural key and **reports unmatched rows by
+  name — it never drops them** — so a later round can
+  score estimates against what actually happened.
+- **The Postgres profile, at full parity** — the whole
+  test suite now runs against Postgres 16 as well as the
+  SQLite default (each test in its own schema, so the
+  pass counts compare directly): **the parity gap is 0**.
+  `make smoke` runs the production smoke — migrations on a
+  fresh schema, dataset load, health/readiness, and a
+  connector batch with an idempotent replay — against
+  `DATABASE_URL`.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -783,8 +838,19 @@ SeaweedFS S3 gateway together.
   this design needs. Kaveri Agro Inputs is fictional; any
   resemblance of figures to a real company's is coincidence of
   construction, not data.
-- **Not built yet (on the round map):** the Postgres
-  production smoke (R11) and the console (R13).
+- **Built and gated in R11:** the production data plane —
+  the connector framework and source registry (six feeds
+  registered with cadence, owner and freshness rule;
+  provenance refused at the port, schema-level), idempotent
+  replay at batch and row level, quarantine with exact
+  named reasons (engines never consume a held row),
+  corrections as linked new facts whose chains re-perform,
+  season-close actuals as a distinct fact class with
+  unmatched rows reported by name, and the Postgres
+  profile at full test parity (gap 0) with the production
+  smoke — migration 0011, API + CLI surfaces, demo walk,
+  tests and eval counters.
+- **Not built yet (on the round map):** the console (R13).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
@@ -818,15 +884,17 @@ src/fertilizer_intelligence/
   scenario.py        scenario forks, planning options, adoptions, verifiers
   brief_rules.py     the versioned brief pack (week + scope rules, sections, pack kinds, badges)
   brief.py           weekly brief, figure verifier, report packs, publication acts + decision log
+  ingest_rules.py    the versioned ingest pack (source registry, class contracts, quarantine reasons)
+  ingest.py          connector loads, batch verifier, corrections + chains, actuals report
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0010 in sqlite + postgres dialects
-scripts/             demo + CLI + local harness wrappers
+migrations/          0001-0011 in sqlite + postgres dialects
+scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md
 ```
