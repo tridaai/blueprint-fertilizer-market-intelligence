@@ -803,10 +803,12 @@ def main() -> int:
           f"tonnes of it.")
     print(f"  the run re-performs by the second route: "
           f"{service.verify_score_run(run['score_id'])['verified']}.")
-    for unmatched in run["unmatched_estimates"]:
-        print(f"  estimate with no actual on record, named "
-              f"not dropped: {unmatched['label']} "
-              f"({unmatched['estimate_id']})")
+    dap = next(u for u in run["unmatched_estimates"]
+               if u["label"] == "DST-GUN/2025-26/rabi/DAP")
+    print(f"  estimates with no actual on record are named, "
+          f"not dropped — {len(run['unmatched_estimates'])} "
+          f"of them, including the DAP estimate just struck: "
+          f"{dap['label']} ({dap['estimate_id']})")
     prior_run = service.score_season("2023-24", "rabi",
                                      "demo desk", "2025-05-10")
     print(f"  the earlier season scores no cells — nothing "

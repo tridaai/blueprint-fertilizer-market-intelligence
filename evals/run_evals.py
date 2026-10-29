@@ -315,7 +315,31 @@ Round 11 adds the data-plane counters (all zero-tolerance):
                                    that the report failed to
                                    name as unmatched
 
-Later rounds extend this gate: spike/delay grading depth (R12).
+Round 12 adds the scoring & depth counters (all zero-tolerance):
+  - score_reperformance_errors ... a score cell that does not
+                                   re-perform from the estimate
+                                   and actual artefacts by the
+                                   second route, or tampering
+                                   the verifier missed
+  - score_attribution_errors ..... the hand-computed fixture's
+                                   attributed errors or its
+                                   most-wrong line differing
+                                   from the stated pack method
+  - score_unmatched_unreported ... a scored season's unmatched
+                                   actual or estimate that the
+                                   run failed to name
+  - spike_lifecycle_errors ....... the planted spike alert's
+                                   lifecycle state not folding
+                                   from its acts alone, or an
+                                   invalid transition recorded
+                                   instead of refused
+  - delay_gap_path_errors ........ the planted delay's gap
+                                   path across the programme
+                                   months differing from the
+                                   stated bands, slipped
+                                   tonnage or recovery, or a
+                                   gap on the path that does
+                                   not re-perform
 """
 
 from __future__ import annotations
@@ -1920,7 +1944,271 @@ def main() -> int:
     if ("DST-GUN", "UREA") not in head_keys11:
         counters["actuals_unmatched_unreported"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11 evals — fertilizer market intelligence")
+    # --- Round 12: season-close scoring ----------------------
+    # The season R11 closed is graded: the UREA cell
+    # re-performs from the artefacts, the unmatched MOP
+    # actual and a freshly struck DAP estimate are named
+    # on the run, a hand-computed fixture's attribution
+    # matches the pack method exactly, and a tampered
+    # payload is caught. Then the depth grading: the
+    # spike alert's full lifecycle folds from its acts
+    # with invalid transitions refused, and the delay's
+    # gap path is re-performed month by month.
+    import json as _json12
+    import sqlite3 as _sqlite12
+
+    from fertilizer_intelligence import models as _models12
+    from fertilizer_intelligence.movements import (
+        AlertStateError as _AlertStateError12)
+
+    counters.setdefault("score_reperformance_errors", 0)
+    counters.setdefault("score_attribution_errors", 0)
+    counters.setdefault("score_unmatched_unreported", 0)
+    counters.setdefault("spike_lifecycle_errors", 0)
+    counters.setdefault("delay_gap_path_errors", 0)
+
+    service.estimate_demand("DST-GUN", "DAP", "2025-26", "rabi",
+                            "2026-04-15")
+    run12 = service.score_season("2025-26", "rabi", "eval desk",
+                                 "2026-04-25")
+    if not service.verify_score_run(run12["score_id"])["verified"]:
+        counters["score_reperformance_errors"] += 1
+    # The join, derived independently here from the estimate
+    # and actual rows alone — the same discipline as the
+    # Round 11 actuals grading.
+    season_estimates12 = store.list_estimates(
+        crop_year="2025-26", season="rabi")
+    superseded12 = {e["supersedes"] for e in season_estimates12
+                    if e.get("supersedes")}
+    head_keys12 = {(e["district_id"], e["product"])
+                   for e in season_estimates12
+                   if e["estimate_id"] not in superseded12}
+    actuals12 = store.season_actuals(crop_year="2025-26",
+                                     season="rabi")
+    matched12 = [a for a in actuals12
+                 if (a["district_id"], a["product"]) in head_keys12]
+    if run12["scored_count"] != len(matched12):
+        counters["score_reperformance_errors"] += 1
+    expected_unmatched12 = sorted(
+        f"{a['district_id']}/{a['crop_year']}/{a['season']}/"
+        f"{a['product']}/{a['actual_kind']}"
+        for a in actuals12
+        if (a["district_id"], a["product"]) not in head_keys12)
+    if run12["unmatched_actuals"] != expected_unmatched12:
+        counters["score_unmatched_unreported"] += 1
+    actual_keys12 = {(a["district_id"], a["product"])
+                     for a in actuals12}
+    expected_no_actual12 = sorted(
+        f"{d}/2025-26/rabi/{p}"
+        for (d, p) in head_keys12 if (d, p) not in actual_keys12)
+    if [u["label"] for u in run12["unmatched_estimates"]] \
+            != expected_no_actual12:
+        counters["score_unmatched_unreported"] += 1
+    if "DST-GUN/2025-26/rabi/DAP" not in expected_no_actual12:
+        counters["score_unmatched_unreported"] += 1
+    cell12 = next(
+        (c for c in run12["cells"]
+         if c["district_id"] == "DST-GUN"
+         and c["product"] == "UREA"
+         and c["actual_kind"] == "consumption"), None)
+    if cell12 is None:
+        counters["score_reperformance_errors"] += 1
+    else:
+        estimate12 = store.get_estimate(cell12["estimate_id"])
+        if cell12["error_tonnes"] != round(
+                45210.5 - estimate12["total_tonnes"], 3):
+            counters["score_reperformance_errors"] += 1
+        attributed12 = sum(
+            l["attributed_error_tonnes"] for l in cell12["lines"])
+        if abs(attributed12 - cell12["error_tonnes"]) > 0.01:
+            counters["score_reperformance_errors"] += 1
+        worst12 = max(cell12["lines"],
+                      key=lambda l: abs(l["attributed_error_tonnes"]))
+        if worst12["driver"] != cell12["most_wrong_driver"] \
+                or worst12["line_no"] != cell12["most_wrong_line_no"]:
+            counters["score_reperformance_errors"] += 1
+    if run12["actual_batches"] != [abatch11["batch_id"]]:
+        counters["score_reperformance_errors"] += 1
+
+    # The hand-computed fixture, planted as stored artefacts:
+    # base 300, soil +400, monsoon 0, price -200, carry-in 0
+    # (total 500) against an actual of 750 — error +250,
+    # attributed base +150 / soil +200 / price -100, the
+    # soil line most wrong. Any other answer is a failure
+    # of the pack method, not a rounding difference.
+    fixture_lines12 = []
+    _value12 = 0.0
+    for _no12, (_driver12, _status12, _delta12) in enumerate([
+            ("base_area_rates", "applied", 300.0),
+            ("soil_nutrient_status", "applied", 400.0),
+            ("monsoon_deviation", "applied", 0.0),
+            ("price_elasticity", "applied", -200.0),
+            ("carry_in_stock", "missing", 0.0)]):
+        _value12 = round(_value12 + _delta12, 3)
+        fixture_lines12.append({
+            "line_no": _no12, "driver": _driver12,
+            "status": _status12, "factor": 1.0,
+            "delta_tonnes": _delta12,
+            "value_after_tonnes": _value12, "inputs": {}})
+    store.insert_estimate({
+        "estimate_id": "EST-EVAL12", "district_id": "DST-EVAL",
+        "product": "UREA", "crop_year": "2025-26",
+        "season": "kharif", "status": "complete",
+        "base_tonnes": 300.0, "total_tonnes": 500.0,
+        "missing_drivers": ["carry_in_stock"],
+        "rules_version": "2026.10.1",
+        "rate_table_version": "2026.10.1",
+        "fact_fingerprint": "eval-fixture-12",
+        "as_of": "2025-06-15", "supersedes": None,
+    }, fixture_lines12)
+    store.insert_season_actuals([_models12.SeasonActual(
+        district_id="DST-EVAL", crop_year="2025-26",
+        season="kharif", product="UREA",
+        actual_kind="consumption", quantity_tonnes=750.0,
+        source="state_dispatch_returns", as_of="2025-11-15")])
+    fixture_run12 = service.score_season(
+        "2025-26", "kharif", "eval desk", "2025-11-20")
+    fcell12 = fixture_run12["cells"][0] \
+        if fixture_run12["scored_count"] == 1 else None
+    if fcell12 is None:
+        counters["score_attribution_errors"] += 1
+    else:
+        fattr12 = {l["driver"]: l["attributed_error_tonnes"]
+                   for l in fcell12["lines"]}
+        if fcell12["error_tonnes"] != 250.0 \
+                or fcell12["error_pct"] != 33.3333 \
+                or fattr12 != {
+                    "base_area_rates": 150.0,
+                    "soil_nutrient_status": 200.0,
+                    "monsoon_deviation": 0.0,
+                    "price_elasticity": -100.0,
+                    "carry_in_stock": 0.0} \
+                or fcell12["most_wrong_driver"] \
+                != "soil_nutrient_status" \
+                or fcell12["most_wrong_line_no"] != 1:
+            counters["score_attribution_errors"] += 1
+
+    raw12 = _sqlite12.connect(settings.sqlite_path)
+    prow12 = raw12.execute(
+        "SELECT payload FROM estimate_scores WHERE score_id = ?",
+        (run12["score_id"],)).fetchone()
+    payload12 = _json12.loads(prow12[0])
+    payload12["cells"][0]["error_tonnes"] += 5.0
+    raw12.execute(
+        "UPDATE estimate_scores SET payload = ? WHERE score_id = ?",
+        (_json12.dumps(payload12), run12["score_id"]))
+    raw12.commit()
+    raw12.close()
+    if service.verify_score_run(run12["score_id"])["verified"]:
+        counters["score_reperformance_errors"] += 1
+
+    # The spike alert's lifecycle, folded from its acts
+    # alone: the Round 3 pass acknowledged and closed it,
+    # and every further act must be refused and record
+    # nothing. A second alert walks the full path here.
+    def _fold12(acts):
+        state = "open"
+        for act in acts:
+            if act["act"] == "acknowledge":
+                state = "acknowledged"
+            elif act["act"] == "close":
+                state = "closed"
+        return state
+
+    spike12 = next(a for a in service.list_alerts()
+                   if a["rule_id"] == "spike")
+    acts12 = store.list_alert_acts(spike12["alert_id"])
+    if _fold12(acts12) != spike12["state"] \
+            or spike12["state"] != "closed":
+        counters["spike_lifecycle_errors"] += 1
+    for attempt12 in (
+            lambda: service.acknowledge_alert(
+                spike12["alert_id"], "eval desk", "too late",
+                "2026-04-01"),
+            lambda: service.close_alert(
+                spike12["alert_id"], "eval desk",
+                "explained_by_event", "2026-04-01"),
+            lambda: service.acknowledge_alert(
+                "ALR-missing", "eval desk", "nobody", "2026-04-01")):
+        try:
+            attempt12()
+            counters["spike_lifecycle_errors"] += 1  # accepted!
+        except (_AlertStateError12, ValueError):
+            pass
+    if len(store.list_alert_acts(spike12["alert_id"])) != len(acts12):
+        counters["spike_lifecycle_errors"] += 1
+
+    watch12 = next(a for a in service.list_alerts()
+                   if a["state"] == "open")
+    watch_acts12 = len(store.list_alert_acts(watch12["alert_id"]))
+    try:
+        service.close_alert(watch12["alert_id"], "eval desk",
+                            "not_a_reason", "2026-04-01")
+        counters["spike_lifecycle_errors"] += 1  # accepted!
+    except ValueError:
+        pass
+    if len(store.list_alert_acts(watch12["alert_id"])) \
+            != watch_acts12:
+        counters["spike_lifecycle_errors"] += 1
+    acked12 = service.acknowledge_alert(
+        watch12["alert_id"], "eval desk",
+        "Eval pass: walking the lifecycle.", "2026-04-01")
+    if acked12["state"] != "acknowledged" \
+            or _fold12(store.list_alert_acts(
+                watch12["alert_id"])) != "acknowledged":
+        counters["spike_lifecycle_errors"] += 1
+    closed12 = service.close_alert(
+        watch12["alert_id"], "eval desk", "explained_by_event",
+        "2026-04-02")
+    if closed12["state"] != "closed" \
+            or _fold12(store.list_alert_acts(
+                watch12["alert_id"])) != "closed":
+        counters["spike_lifecycle_errors"] += 1
+
+    # The delay's gap path across the whole programme:
+    # short while the vessel is slipped, comfortable from
+    # the month it lands, each month re-performed and
+    # superseding the last.
+    path12 = []
+    for as_of12 in ("2025-10-31", "2025-11-30", "2025-12-31",
+                    "2026-01-31", "2026-02-28", "2026-03-31"):
+        path12.append(service.supply_gap(
+            "DAP", "2025-26", "kharif", as_of12))
+        if service.verify_gap("DAP", "2025-26", "kharif"):
+            counters["delay_gap_path_errors"] += 1
+    if [g["band"] for g in path12] != [
+            "short", "short", "comfortable", "comfortable",
+            "comfortable", "comfortable"]:
+        counters["delay_gap_path_errors"] += 1
+    if [g["slipped_tonnes"] for g in path12] != [
+            55000.0, 55000.0, 0.0, 0.0, 0.0, 0.0]:
+        counters["delay_gap_path_errors"] += 1
+    if [g["programme_cover_pct"] for g in path12] != [
+            52.5862, 52.5862, 100.0, 100.0, 100.0, 100.0]:
+        counters["delay_gap_path_errors"] += 1
+    # The stored chain is one unbroken line: walking the
+    # supersedes links back from the head visits every
+    # stored gap exactly once — no forks, no orphans, no
+    # cycles — and the chain is exactly the six programme
+    # months of the path. (The head is whichever gap was
+    # struck last across the whole grading flow; the
+    # path property is the unbroken line, not the order
+    # earlier rounds happened to strike in.)
+    stored12 = store.list_gaps("DAP", "2025-26", "kharif")
+    head12 = service.get_gap("DAP", "2025-26", "kharif")
+    walked12 = []
+    cursor12 = head12
+    while cursor12 is not None:
+        walked12.append(cursor12["gap_id"])
+        cursor12 = store.get_gap(cursor12["supersedes"]) \
+            if cursor12["supersedes"] else None
+    if sorted(walked12) != sorted(
+            g["gap_id"] for g in stored12) \
+            or sorted(walked12) != sorted(
+                g["gap_id"] for g in path12):
+        counters["delay_gap_path_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
