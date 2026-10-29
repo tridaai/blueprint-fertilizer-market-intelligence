@@ -1990,6 +1990,216 @@ class MarketStore:
             tuple(params))
         return [self._readiness_refusal_row(row) for row in rows]
 
+    # -- the collaboration layer (R15): access entries,
+    # annotations, follow-up tasks and acts, review queues
+    # and their refusals. All insert-only: a row, once
+    # written, is the record.
+
+    def insert_access_entry(self, entry: dict) -> None:
+        self._insert_many(
+            "access_entries",
+            ["entry_id", "fingerprint", "principal", "role",
+             "surface", "decision", "at", "rules_version",
+             "payload"],
+            [(
+                entry["entry_id"], entry["fingerprint"],
+                entry["principal"], entry["role"],
+                entry["surface"], entry["decision"], entry["at"],
+                entry["rules_version"], json.dumps(entry),
+            )],
+        )
+
+    def _access_entry_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_access_entry(self, entry_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM access_entries WHERE entry_id = {self._ph}",
+            (entry_id,),
+        )
+        return self._access_entry_row(rows[0]) if rows else None
+
+    def list_access_entries(self, principal=None, surface=None,
+                            decision=None) -> list[dict]:
+        sql, params = "SELECT * FROM access_entries WHERE 1=1", []
+        for column, value in (("principal", principal),
+                              ("surface", surface),
+                              ("decision", decision)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY at, entry_id",
+                          tuple(params))
+        return [self._access_entry_row(row) for row in rows]
+
+    def insert_annotation(self, annotation: dict) -> None:
+        self._insert_many(
+            "annotations",
+            ["annotation_id", "fingerprint", "target_kind",
+             "target_id", "author", "at", "rules_version",
+             "payload"],
+            [(
+                annotation["annotation_id"],
+                annotation["fingerprint"],
+                annotation["target_kind"], annotation["target_id"],
+                annotation["author"], annotation["at"],
+                annotation["rules_version"], json.dumps(annotation),
+            )],
+        )
+
+    def _annotation_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_annotation(self, annotation_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM annotations "
+            f"WHERE annotation_id = {self._ph}",
+            (annotation_id,),
+        )
+        return self._annotation_row(rows[0]) if rows else None
+
+    def list_annotations(self, target_kind=None, target_id=None,
+                         author=None) -> list[dict]:
+        sql, params = "SELECT * FROM annotations WHERE 1=1", []
+        for column, value in (("target_kind", target_kind),
+                              ("target_id", target_id),
+                              ("author", author)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY at, annotation_id",
+                          tuple(params))
+        return [self._annotation_row(row) for row in rows]
+
+    def insert_followup_task(self, task: dict) -> None:
+        self._insert_many(
+            "followup_tasks",
+            ["task_id", "fingerprint", "target_kind", "target_id",
+             "assignee", "created_by", "at", "rules_version",
+             "payload"],
+            [(
+                task["task_id"], task["fingerprint"],
+                task["target_kind"], task["target_id"],
+                task["assignee"], task["created_by"], task["at"],
+                task["rules_version"], json.dumps(task),
+            )],
+        )
+
+    def _followup_task_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_followup_task(self, task_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM followup_tasks WHERE task_id = {self._ph}",
+            (task_id,),
+        )
+        return self._followup_task_row(rows[0]) if rows else None
+
+    def list_followup_tasks(self, target_kind=None, target_id=None,
+                            assignee=None) -> list[dict]:
+        sql, params = "SELECT * FROM followup_tasks WHERE 1=1", []
+        for column, value in (("target_kind", target_kind),
+                              ("target_id", target_id),
+                              ("assignee", assignee)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY at, task_id",
+                          tuple(params))
+        return [self._followup_task_row(row) for row in rows]
+
+    def insert_followup_act(self, act: dict) -> None:
+        self._insert_many(
+            "followup_acts",
+            ["act_id", "fingerprint", "task_id", "act", "actor",
+             "at", "rules_version", "payload"],
+            [(
+                act["act_id"], act["fingerprint"], act["task_id"],
+                act["act"], act["actor"], act["at"],
+                act["rules_version"], json.dumps(act),
+            )],
+        )
+
+    def _followup_act_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_followup_act(self, act_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM followup_acts WHERE act_id = {self._ph}",
+            (act_id,),
+        )
+        return self._followup_act_row(rows[0]) if rows else None
+
+    def list_followup_acts(self, task_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM followup_acts WHERE 1=1", []
+        if task_id is not None:
+            sql += f" AND task_id = {self._ph}"
+            params.append(task_id)
+        rows = self._rows(sql + " ORDER BY at, act_id",
+                          tuple(params))
+        return [self._followup_act_row(row) for row in rows]
+
+    def insert_review_queue(self, queue: dict) -> None:
+        self._insert_many(
+            "review_queues",
+            ["queue_id", "fingerprint", "as_of", "struck_by",
+             "rules_version", "payload"],
+            [(
+                queue["queue_id"], queue["fingerprint"],
+                queue["as_of"], queue["struck_by"],
+                queue["rules_version"], json.dumps(queue),
+            )],
+        )
+
+    def _review_queue_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_review_queue(self, queue_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM review_queues WHERE queue_id = {self._ph}",
+            (queue_id,),
+        )
+        return self._review_queue_row(rows[0]) if rows else None
+
+    def list_review_queues(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM review_queues ORDER BY as_of, queue_id")
+        return [self._review_queue_row(row) for row in rows]
+
+    def insert_review_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "review_refusals",
+            ["refusal_id", "fingerprint", "as_of", "struck_by",
+             "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["as_of"], refusal["struck_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _review_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_review_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM review_refusals "
+            f"WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._review_refusal_row(rows[0]) if rows else None
+
+    def list_review_refusals(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM review_refusals ORDER BY as_of, refusal_id")
+        return [self._review_refusal_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
