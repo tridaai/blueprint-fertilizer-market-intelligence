@@ -311,18 +311,52 @@ def test_api_and_cli_surfaces(service, settings, tmp_path, capsys):
 
     from fertilizer_intelligence.cli import main as cli_main
 
-    db = service.settings.sqlite_path
-    base = ["--db", str(db), "--migrations", "migrations"]
+    # The CLI leg is self-contained (the R11 pattern): it
+    # builds its own record in a fresh database — strike
+    # the estimate, land the actual, score the season —
+    # so it exercises the same path on either profile.
+    base = ["--db", str(tmp_path / "cli-r12.db"),
+            "--migrations", "migrations"]
+    rc = cli_main(base + [
+        "estimate", "--district", "DST-GUN", "--product", "UREA",
+        "--crop-year", "2025-26", "--season", "rabi",
+        "--as-of", "2026-04-15"])
+    assert rc == 0
+    capsys.readouterr()
+    rows_file = tmp_path / "actuals.json"
+    rows_file.write_text(json.dumps([
+        _actual("DST-GUN", "UREA", "consumption", 45210.5)]),
+        encoding="utf-8")
+    rc = cli_main(base + [
+        "ingest-load", "--source", "state_dispatch_returns",
+        "--file", str(rows_file), "--loaded-by", "cli desk",
+        "--load-date", "2026-04-20"])
+    assert rc == 0
+    capsys.readouterr()
+    rc = cli_main(base + [
+        "score-season", "--crop-year", "2025-26",
+        "--season", "rabi", "--by", "cli desk", "--as-of", AS_OF])
+    assert rc == 0
+    out = capsys.readouterr().out
+    run_cli, _ = json.JSONDecoder().raw_decode(
+        out[out.index("{\n"):])
+    assert run_cli["scored_count"] == 1
+    assert run_cli["cells"][0]["product"] == "UREA"
+    rc = cli_main(base + ["verify-score", run_cli["score_id"]])
+    assert rc == 0
+    out = capsys.readouterr().out
+    verified, _ = json.JSONDecoder().raw_decode(
+        out[out.index("{\n"):])
+    assert verified["verified"]
     rc = cli_main(base + ["scores", "--crop-year", "2025-26",
                           "--season", "rabi"])
     assert rc == 0
     out = capsys.readouterr().out
     printed, _ = json.JSONDecoder().raw_decode(
         out[out.index("[\n"):])
-    assert len(printed) == 1
-    rc = cli_main(base + ["verify-score", printed[0]["score_id"]])
+    assert [r["score_id"] for r in printed] == [run_cli["score_id"]]
+    rc = cli_main(base + ["score-refusals"])
     assert rc == 0
     out = capsys.readouterr().out
-    verified, _ = json.JSONDecoder().raw_decode(
-        out[out.index("{\n"):])
-    assert verified["verified"]
+    assert json.JSONDecoder().raw_decode(
+        out[out.index("["):])[0] == []
