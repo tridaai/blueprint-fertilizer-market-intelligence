@@ -2799,6 +2799,8 @@ def main() -> int:
     # review queue. The scope verdicts are re-derived
     # from the district register; the queue's membership
     # is re-folded here from the publication acts alone.
+    import sqlite3 as _sqlite3
+
     counters.setdefault("access_scope_errors", 0)
     counters.setdefault("access_log_errors", 0)
     counters.setdefault("annotation_flag_errors", 0)
@@ -2894,6 +2896,33 @@ def main() -> int:
     if not service.verify_notes()["verified"]:
         counters["followup_fold_errors"] += 1
 
+    # The Round 3 section tampered one estimate's stored
+    # total (+25) and never restored it. That estimate is
+    # a member of a pending outlook, so the queue must
+    # REFUSE outright and record the refusal — an
+    # unverifiable artefact never enters a queue. The
+    # tamper is then restored (as the narrative tamper
+    # above was) and the queue struck cleanly.
+    from fertilizer_intelligence.review import ReviewRefused
+    refusals_before15 = len(service.list_review_refusals())
+    try:
+        service.publication_review_queue("eval desk", asof15)
+        counters["review_queue_errors"] += 1  # accepted!
+    except ReviewRefused:
+        pass
+    if len(service.list_review_refusals()) <= refusals_before15:
+        counters["review_queue_errors"] += 1
+    _raw15 = _sqlite3.connect(settings.sqlite_path)
+    _victim15 = store.list_estimates()[0]
+    _raw15.execute(
+        "UPDATE demand_estimates SET total_tonnes = "
+        "total_tonnes - 25 WHERE estimate_id = ?",
+        (_victim15["estimate_id"],))
+    _raw15.commit()
+    _raw15.close()
+    if service.verify_estimate(_victim15["estimate_id"]):
+        counters["review_queue_errors"] += 1
+
     queue15 = service.publication_review_queue(
         "eval desk", asof15)
     acts15 = store.list_publication_acts()
@@ -2931,7 +2960,6 @@ def main() -> int:
 
     # Tamper, last: rewrite one access entry's decision
     # in the raw store — the verifier must name it.
-    import sqlite3 as _sqlite3
     _conn = _sqlite3.connect(settings.sqlite_path)
     _row = _conn.execute(
         "SELECT entry_id, payload FROM access_entries "
