@@ -318,11 +318,40 @@ those steps; every state transition is a stored artefact.
   (spike, delay, events) is recorded in the manifest at generation
   time. Graders read the manifest, never a hand-copied expectation,
   so the truth cannot drift from the data.
+- **A map cell is a composition, never a computation.** The
+  district map (R13) computes no figure: each cell binds artefact
+  ids — estimate, prior-year estimate, gap, assessment — and its
+  readings are stated compositions of theirs under the map pack
+  (the worse of the product gap band and the district's signal
+  pressure carries the cell). Verification is archival: a stored
+  map re-performs against the artefacts it binds, fetched by id,
+  so it stays provable after those artefacts are superseded. A
+  partial estimate can never render as a confident colour, and
+  no-data is a rendering distinct from zero.
+- **Evidence classes are never merged.** The map's signal layer
+  keeps confirmed field reports and pending (unreviewed or
+  queried) reports in separate, labelled classes, folded from
+  the review acts at the map's date; rejected reports appear in
+  neither and are counted on the cell. A combined count would be
+  a different — and false — claim about what the district knows.
+- **Board membership is derived state, ranked by packs.** A
+  morning-board lane holds exactly what its derivation produces
+  at the board's date (an alert whose acts fold to open, a map
+  cell banded tight or short, a brief no publication act names),
+  ordered by the owning packs' severity rules, never by recency;
+  the verifier re-derives the lanes as ordered lists.
+- **Queue membership is the gap record, owned from birth.** The
+  action queue holds one item per non-comfortable gap head —
+  derived, never curated — struck with a named owner and a due
+  date from the band's term. Its state, owner and scenario slot
+  are folds of insert-only acts; a close must speak the pack's
+  reason vocabulary, and a scenario link names a stored fork by
+  reference and copies nothing.
 - **Fail-closed model profiles.** Profile resolution happens at
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0012)
+## Data model (migrations 0001–0013)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -489,6 +518,24 @@ payload) and `score_refusals` (one row per refused run,
 with its re-performance problems in the payload). Both
 are insert-only; a score is a grading of stored
 artefacts, never an edit of an estimate or an actual.
+
+Market-surface tables (0013): `market_maps` and
+`map_refusals` (one row per district map or its refusal:
+crop year, season, strike date, the named builder and
+the map pack version as columns; the cells, the monsoon
+layer and the rendered page in the payload), `morning_boards`
+and `board_refusals` (the same shape per role, with the
+lanes and their rows in the payload), and the queue pair
+`queue_items` (one row per gap item: the gap it answers,
+its product and season, its band, its struck and due
+dates as columns; the pack owner and gap figures in the
+payload) with `queue_acts` (one row per act — assign,
+start, link scenario, close — with the named actor, the
+close's stated reason, the assign's owner and the
+link's fork id as columns). Maps, boards and items are
+insert-only artefacts; queue acts are insert-only and an
+item's state exists nowhere as a column — it is the
+fold of its acts, exactly like an alert's.
 
 ## Deployment
 

@@ -722,6 +722,78 @@ and never presents a stale figure as current.
   exact) with the stored gap chain walked as one
   unbroken line.
 
+## What Round 13 adds
+
+- **The district demand/gap map** (roadmap F21-GS1) —
+  a schematic tile grid of the twelve tracked districts,
+  one artefact per season, composed from artefact heads
+  under the versioned map pack (`map_rules`, 2026.10.1)
+  with product switchers across all six products. A
+  cell's demand outlook reads the district's own head
+  estimate against its prior-year counterpart — estimate
+  against estimate, both named on the cell. Its gap band
+  is the more severe of two stated readings: the
+  product's season gap band (one reading for the whole
+  tracked market) and the district's own field-signal
+  pressure from its R7 assessment, with the composition
+  stated on the cell. A partial estimate renders hatched
+  and badged with its missing drivers — never a
+  confident colour; a district with no estimate renders
+  as no-data, a different claim from zero; a product
+  with no supply side (the agrochemicals) contributes no
+  product reading and the cell says which readings it
+  does carry. Every cell is re-performed against the
+  artefacts it binds before a map is stored — one
+  mismatched cell refuses the whole map, with the
+  refusal recorded — and a stored map stays verifiable
+  archivally after the record moves on.
+- **Monsoon & field-signal layers** (F21-GS2) —
+  switchable layers over the same tiles. The monsoon
+  layer re-performs from the monsoon facts, deviation
+  and band per district. The signal layer lists a
+  cell's field reports in two classes that are never
+  merged: confirmed (a named reviewer's confirm is the
+  latest word) rendered solid, and pending — unreviewed
+  or queried — in its own labelled class, with rejected
+  reports counted on the cell and shown in neither
+  class. The layer is read as of the map's date: a
+  report that landed later is not on an earlier map.
+- **The market morning board** (F21-OW1) — one opening
+  view per role (regional head, national planner,
+  leadership), its lanes stated in the board pack
+  (`board_rules`, 2026.10.1): open alerts, districts
+  trending short, stale figures, pending brief
+  approvals. Rows re-derive from artefacts — an alert
+  is in the open lane exactly while its fold of acts at
+  the board's date says open; a short-district row is a
+  map cell; a stale row names the share artefact whose
+  own readings carry stale observations; a pending
+  brief is one no publication act names. Ranking is the
+  owning packs' — alert band and rule order, gap
+  severity, stale weight, brief severity (the worst
+  thing a brief carries) — never recency. A candidate
+  board is re-derived lane for lane before storage; one
+  wrong row refuses the whole board.
+- **The shortage & gap action queue** (F21-OW2) —
+  every tight or short gap head becomes a work item,
+  struck with the queue pack's named default owner for
+  its product (`queue_rules`, 2026.10.1) and a due date
+  from its band's stated term (seven days short,
+  fourteen tight; overdue is derived at the read date,
+  never a stored flag). Membership is derived, never
+  curated: exactly one item per non-comfortable gap
+  head, following the head when a successor gap clears
+  it. Item state, current owner and the mitigation
+  scenario slot are folds of named, insert-only acts —
+  assign, start, link scenario (a stored R9 fork, by
+  reference only), close — and a close is valid only
+  with a reason from the pack's stated vocabulary
+  (supply secured, scenario adopted, demand revised,
+  gap cleared, risk accepted). `make mapcheck`
+  re-performs every figure the three surfaces show, on
+  a throwaway store, and their pages are static and
+  read-only: no form, no POST, no control verb.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -759,6 +831,7 @@ make demo           # generate the dataset, walk the planted truth
 make harness        # exercise the HTTP read surface in-process
 make test           # pytest
 make evals          # the eval gate
+make mapcheck       # re-perform every figure the map/board/queue show
 make serve          # the API on http://localhost:8000
 ```
 
@@ -906,7 +979,22 @@ SeaweedFS S3 gateway together.
   named in both directions — plus the spike-lifecycle and
   delay-gap-path eval depth — migration 0012, API + CLI
   surfaces, demo walk, tests and eval counters.
-- **Not built yet (on the round map):** the console (R13).
+- **Built and gated in R13:** the district demand/gap
+  map with monsoon and field-signal layers (cells
+  composed from artefact heads under the map pack,
+  partial hatched and no-data dashed, confirmed and
+  pending signals never merged, archival by-id
+  verification with wholesale refusal), the per-role
+  morning board (lanes re-derived from artefacts,
+  ranked by the owning packs, never by recency), and
+  the gap action queue (membership exactly the
+  non-comfortable gap heads, pack-named owners, due
+  states derived, closes speaking a stated vocabulary,
+  scenario links by reference) — migration 0013, API +
+  CLI surfaces, a map/board checker script, demo walk,
+  tests and five new eval counters.
+- **Not built yet (on the round map):** regional rollups
+  and territory planning (R14).
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
