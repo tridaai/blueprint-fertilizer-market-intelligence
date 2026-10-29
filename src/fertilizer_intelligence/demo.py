@@ -900,6 +900,107 @@ def main() -> int:
     print(f"  the queue re-derives end to end: "
           f"{service.verify_queue('2026-04-21')['verified']}.")
 
+    print("\n--- Round 14: rollups, territory packs, readiness ---")
+    rollup = service.regional_rollup(
+        "2025-26", "kharif", "demo desk", "2026-04-21")
+    urea14 = next(b for b in rollup["products"]
+                  if b["product"] == "UREA")
+    regions_line = ", ".join(
+        f"{r['region']} {r['total_tonnes']:,.1f} t"
+        for r in urea14["regions"])
+    mop14 = next(b for b in rollup["products"]
+                 if b["product"] == "MOP")
+    print(f"  the kharif rollup ({rollup['rollup_id']}) "
+          f"decomposes the outlook's own "
+          f"{rollup['national_total_tonnes']:,.1f} t — UREA by "
+          f"region: {regions_line}.")
+    print(f"  MOP's gap rides by reference to "
+          f"{mop14['gap']['gap_id']}: {mop14['gap']['band']}, "
+          f"{mop14['gap']['gap_tonnes']:,.1f} t, struck against "
+          f"{mop14['gap']['demand_basis'].replace('_', ' ')}.")
+    print(f"  the rollup re-performs member by member: "
+          f"{service.verify_rollup(rollup['rollup_id'])['verified']}.")
+
+    pack14 = service.export_pack(
+        "territory", "south", "demo desk", "2026-04-21")
+    print(f"  the south territory pack ({pack14['pack_id']}) "
+          f"renders the rollup for the season in scope at its "
+          f"date — {len(pack14['tables']['districts'])} district "
+          f"lines, {len(pack14['tables']['gaps'])} gap lines, "
+          f"every figure the rollup's own; it verifies: "
+          f"{service.verify_pack(pack14['pack_id'])['verified']}.")
+
+    plan = service.season_readiness(
+        "south", "2025-26", "kharif", "demo desk", "2026-04-21")
+    lines = {line["line"]: line for line in plan["lines"]}
+    print(f"  the south's kharif readiness plan "
+          f"({plan['readiness_id']}) reads ready: {plan['ready']} "
+          f"— blocking lines: "
+          f"{', '.join(plan['blocking_lines']) or 'none'}.")
+    for line in plan["lines"]:
+        print(f"    {line['line']}: {line['status']} — "
+              f"{line['detail']}")
+    outlook_line = lines["outlook_published"]
+    if outlook_line["status"] != "complete":
+        outlook_id = outlook_line["figures"]["outlook_id"]
+        service.publish_artefact(
+            "season_outlook", outlook_id,
+            "A. Raman (head of strategy)", "2026-04-22")
+        print(f"  the head outlook {outlook_id} is published "
+              f"by a named act — the line can now be scored "
+              f"from the record, not from anyone's say-so.")
+    risks = lines["open_risks"]["figures"]
+    for row in risks["unowned_short_gaps"]:
+        if row["item_id"]:
+            service.assign_queue_item(
+                row["item_id"], "demo duty manager",
+                "Demo Assignee — supply desk", "2026-04-22")
+            print(f"  the short {row['product']} gap's item "
+                  f"{row['item_id']} is assigned by act.")
+    for row in risks["open_alerts"]:
+        service.acknowledge_alert(
+            row["alert_id"], "demo duty manager",
+            "seen on the readiness walk", "2026-04-22")
+    if risks["open_alerts"]:
+        print(f"  {len(risks['open_alerts'])} open alert(s) "
+              f"acknowledged by named acts.")
+    uncovered = [r for r in
+                 lines["field_coverage"]["figures"]["districts"]
+                 if not r["covered"]]
+    if uncovered:
+        service.sync_field_reports([
+            {"submission_id": f"DEMO-R14-{r['district_id']}",
+             "reporter": "Demo Field Officer",
+             "district_id": r["district_id"], "product": "UREA",
+             "signal_type": "demand_signal", "direction": "up",
+             "observed_on": "2025-10-20",
+             "detail": "Pre-season coverage visit."}
+            for r in uncovered], "2026-04-22")
+        for view in service.list_field_reports(state="unreviewed"):
+            if view["submission_id"].startswith("DEMO-R14-"):
+                service.review_field_report(
+                    view["report_id"], "confirm", "demo reviewer",
+                    "corroborated", "2026-04-22")
+        print(f"  confirmed field reports land for "
+              f"{len(uncovered)} uncovered district(s) — "
+              f"coverage is evidence, not a checkbox.")
+    plan2 = service.season_readiness(
+        "south", "2025-26", "kharif", "demo desk", "2026-04-23")
+    flipped = [line["line"] for line in plan2["lines"]
+               if line["status"] == "complete"
+               and lines[line["line"]]["status"] != "complete"]
+    print(f"  re-struck, the plan ({plan2['readiness_id']}) "
+          f"supersedes the first by link; lines flipped to "
+          f"complete: {', '.join(flipped) or 'none'}; still "
+          f"blocking: {', '.join(plan2['blocking_lines']) or 'none'} "
+          f"— a short position is a fact of the market, and "
+          f"the plan keeps naming it rather than reading ready "
+          f"over it.")
+    print(f"  both plans re-derive from the record: "
+          f"{service.verify_readiness(plan['readiness_id'])['verified']}"
+          f" and "
+          f"{service.verify_readiness(plan2['readiness_id'])['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
