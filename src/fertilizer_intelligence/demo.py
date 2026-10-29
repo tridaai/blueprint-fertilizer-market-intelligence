@@ -784,6 +784,36 @@ def main() -> int:
     for label in prior["unmatched"]:
         print(f"  unmatched: {label}")
 
+    service.estimate_demand("DST-GUN", "DAP", "2025-26", "rabi",
+                            "2026-04-15")
+    run = service.score_season("2025-26", "rabi", "demo desk",
+                               "2026-04-25")
+    cell = run["cells"][0]
+    print(f"\nSeason close: the struck estimates are graded "
+          f"against the actuals ({run['score_id']}: "
+          f"{run['scored_count']} cell scored, run bias "
+          f"{run['bias_tonnes']} tonnes). Guntur urea was "
+          f"estimated at {cell['estimate_tonnes']} tonnes and "
+          f"closed at {cell['actual_tonnes']} — an error of "
+          f"{cell['error_tonnes']} tonnes "
+          f"({cell['error_pct']}%). The pack attributes the "
+          f"error across the estimate's own lines; the most "
+          f"wrong line is {cell['most_wrong_driver']} at "
+          f"{cell['most_wrong_attributed_error_tonnes']} "
+          f"tonnes of it.")
+    print(f"  the run re-performs by the second route: "
+          f"{service.verify_score_run(run['score_id'])['verified']}.")
+    for unmatched in run["unmatched_estimates"]:
+        print(f"  estimate with no actual on record, named "
+              f"not dropped: {unmatched['label']} "
+              f"({unmatched['estimate_id']})")
+    prior_run = service.score_season("2023-24", "rabi",
+                                     "demo desk", "2025-05-10")
+    print(f"  the earlier season scores no cells — nothing "
+          f"was ever struck for it — and its actual is named "
+          f"unmatched on the run's face: "
+          f"{prior_run['unmatched_actuals']}")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
