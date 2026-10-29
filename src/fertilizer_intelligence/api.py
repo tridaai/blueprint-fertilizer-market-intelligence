@@ -21,6 +21,7 @@ from .demand import NarrativeRefused
 from .field import FieldReviewError
 from .logging_config import configure_logging, new_request_id, request_id_var
 from .movements import AlertStateError
+from .scoring import ScoringRefused
 from .service import MarketService
 
 log = logging.getLogger("fertilizer_intelligence.api")
@@ -168,6 +169,13 @@ class BriefRequest(BaseModel):
     week_ending: str
     assembled_by: str
     as_of: str | None = None
+
+
+class ScoreRequest(BaseModel):
+    crop_year: str
+    season: str
+    scored_by: str
+    as_of: str
 
 
 class PackRequest(BaseModel):
@@ -1127,6 +1135,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         week_ending: str | None = None,
     ) -> list[dict]:
         return service.list_brief_refusals(week_ending)
+
+    # -- season-close estimate scoring (R12) ------------------
+
+    @app.post("/scores")
+    def score_season(body: ScoreRequest) -> dict:
+        try:
+            return service.score_season(
+                body.crop_year, body.season, body.scored_by,
+                body.as_of)
+        except ScoringRefused as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"refusal_id": exc.refusal_id,
+                        "problems": exc.problems}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/scores")
+    def list_scores(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_score_runs(crop_year, season)
+
+    @app.get("/scores/{score_id}")
+    def get_score(score_id: str) -> dict:
+        run = service.get_score_run(score_id)
+        if run is None:
+            raise HTTPException(
+                status_code=404, detail=f"no such score run: {score_id}")
+        return run
+
+    @app.get("/scores/{score_id}/verify")
+    def verify_score(score_id: str) -> dict:
+        try:
+            return service.verify_score_run(score_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/score-refusals")
+    def list_score_refusals(
+        crop_year: str | None = None, season: str | None = None,
+    ) -> list[dict]:
+        return service.list_score_refusals(crop_year, season)
 
     @app.post("/packs")
     def export_pack(body: PackRequest) -> dict:

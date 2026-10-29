@@ -33,6 +33,7 @@ from datetime import date
 from pathlib import Path
 
 from .brief import BriefRefused
+from .scoring import ScoringRefused
 from .config import Settings
 from .demand import NarrativeRefused
 from .field import FieldReviewError
@@ -391,6 +392,26 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("brief-refusals", help="list recorded brief refusals")
     p.add_argument("--week-ending", default=None)
+
+    p = sub.add_parser("score-season", help="score a closed season's estimates against its actuals")
+    p.add_argument("--crop-year", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("scores", help="list stored season score runs")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
+
+    p = sub.add_parser("get-score", help="read one season score run")
+    p.add_argument("score_id")
+
+    p = sub.add_parser("verify-score", help="re-perform every score in a stored run")
+    p.add_argument("score_id")
+
+    p = sub.add_parser("score-refusals", help="list recorded score refusals")
+    p.add_argument("--crop-year", default=None)
+    p.add_argument("--season", default=None)
 
     p = sub.add_parser("pack", help="export a product or region report pack")
     p.add_argument("--kind", required=True, choices=["product", "region"])
@@ -857,6 +878,22 @@ def main(argv=None) -> int:
             return 0
         elif args.command == "brief-refusals":
             result = service.list_brief_refusals(args.week_ending)
+        elif args.command == "score-season":
+            result = service.score_season(
+                args.crop_year, args.season, args.by, args.as_of)
+        elif args.command == "scores":
+            result = service.list_score_runs(args.crop_year, args.season)
+        elif args.command == "get-score":
+            result = service.get_score_run(args.score_id)
+            if result is None:
+                print(f"no such score run: {args.score_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "verify-score":
+            result = service.verify_score_run(args.score_id)
+        elif args.command == "score-refusals":
+            result = service.list_score_refusals(
+                args.crop_year, args.season)
         elif args.command == "pack":
             result = service.export_pack(
                 args.kind, args.key, args.by, as_of)
@@ -924,6 +961,11 @@ def main(argv=None) -> int:
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:
+        print(json.dumps(
+            {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except ScoringRefused as exc:
         print(json.dumps(
             {"refused": exc.problems, "refusal_id": exc.refusal_id},
             indent=2), file=sys.stderr)

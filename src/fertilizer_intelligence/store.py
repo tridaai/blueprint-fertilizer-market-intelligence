@@ -1285,6 +1285,85 @@ class MarketStore:
                           tuple(params))
         return [self._brief_refusal_row(row) for row in rows]
 
+    def insert_score_run(self, run: dict) -> None:
+        self._insert_many(
+            "estimate_scores",
+            ["score_id", "fingerprint", "crop_year", "season",
+             "as_of", "scored_by", "rules_version", "payload"],
+            [(
+                run["score_id"], run["fingerprint"],
+                run["crop_year"], run["season"], run["as_of"],
+                run["scored_by"], run["rules_version"],
+                json.dumps(run),
+            )],
+        )
+
+    def _score_run_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_score_run(self, score_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM estimate_scores WHERE score_id = {self._ph}",
+            (score_id,),
+        )
+        return self._score_run_row(rows[0]) if rows else None
+
+    def score_run_by_fingerprint(self, fingerprint: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM estimate_scores WHERE fingerprint = {self._ph}",
+            (fingerprint,),
+        )
+        return self._score_run_row(rows[0]) if rows else None
+
+    def list_score_runs(self, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM estimate_scores WHERE 1=1", []
+        if crop_year is not None:
+            sql += f" AND crop_year = {self._ph}"
+            params.append(crop_year)
+        if season is not None:
+            sql += f" AND season = {self._ph}"
+            params.append(season)
+        rows = self._rows(sql + " ORDER BY crop_year, season, score_id",
+                          tuple(params))
+        return [self._score_run_row(row) for row in rows]
+
+    def insert_score_refusal(self, refusal: dict) -> None:
+        self._insert_many(
+            "score_refusals",
+            ["refusal_id", "fingerprint", "crop_year", "season",
+             "as_of", "scored_by", "rules_version", "payload"],
+            [(
+                refusal["refusal_id"], refusal["fingerprint"],
+                refusal["crop_year"], refusal["season"],
+                refusal["as_of"], refusal["scored_by"],
+                refusal["rules_version"], json.dumps(refusal),
+            )],
+        )
+
+    def _score_refusal_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_score_refusal(self, refusal_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM score_refusals WHERE refusal_id = {self._ph}",
+            (refusal_id,),
+        )
+        return self._score_refusal_row(rows[0]) if rows else None
+
+    def list_score_refusals(self, crop_year=None, season=None) -> list[dict]:
+        sql, params = "SELECT * FROM score_refusals WHERE 1=1", []
+        if crop_year is not None:
+            sql += f" AND crop_year = {self._ph}"
+            params.append(crop_year)
+        if season is not None:
+            sql += f" AND season = {self._ph}"
+            params.append(season)
+        rows = self._rows(sql + " ORDER BY crop_year, season, refusal_id",
+                          tuple(params))
+        return [self._score_refusal_row(row) for row in rows]
+
     def insert_export_pack(self, pack_row: dict) -> None:
         self._insert_many(
             "export_packs",

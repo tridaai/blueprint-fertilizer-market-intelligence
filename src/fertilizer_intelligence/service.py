@@ -23,6 +23,7 @@ from . import ingest_rules as ingest_pack
 from . import movements as movement_engine
 from . import policy as policy_engine
 from . import scenario as scenario_engine
+from . import scoring as scoring_engine
 from . import share as share_engine
 from . import supply as supply_engine
 from .config import Settings, load_settings
@@ -1397,6 +1398,65 @@ class MarketService:
         problems = brief_engine.verify_brief(self.store, brief)
         return {"brief_id": brief_id, "verified": not problems,
                 "problems": problems}
+
+    # -- season-close estimate scoring (R12) -------------------
+
+    def score_season(self, crop_year, season, scored_by,
+                     as_of) -> dict:
+        """Score a closed season's head estimates against its
+        season-close actuals.
+
+        The candidate run is assembled from the stored
+        estimate and actual artefacts alone — nothing is
+        re-estimated — and every cell is re-performed by
+        the second route before anything is stored. One
+        mismatch refuses the run wholesale: a refusal
+        artefact is recorded with its reasons and
+        ScoringRefused is raised. Compute-or-return:
+        re-scoring an unchanged record returns the stored
+        run."""
+        if not scored_by or not scored_by.strip():
+            raise ValueError(
+                "a score run names who scored it — an unnamed "
+                "run is refused")
+        candidate = scoring_engine.build_score_run(
+            self.store, crop_year, season, as_of, scored_by)
+        problems = scoring_engine.verify_score_run(
+            self.store, candidate.model_dump())
+        if problems:
+            refusal = scoring_engine.build_refusal(
+                crop_year, season, as_of, scored_by, problems)
+            existing = self.store.get_score_refusal(
+                refusal.refusal_id)
+            if existing is None:
+                self.store.insert_score_refusal(
+                    refusal.model_dump())
+            raise scoring_engine.ScoringRefused(
+                problems, refusal.refusal_id)
+        existing = self.store.get_score_run(candidate.score_id)
+        if existing is not None:
+            return existing
+        self.store.insert_score_run(candidate.model_dump())
+        log.info("season score run stored: %s", candidate.score_id)
+        return self.store.get_score_run(candidate.score_id)
+
+    def get_score_run(self, score_id) -> dict | None:
+        return self.store.get_score_run(score_id)
+
+    def list_score_runs(self, crop_year=None, season=None) -> list[dict]:
+        return self.store.list_score_runs(crop_year, season)
+
+    def verify_score_run(self, score_id) -> dict:
+        run = self.store.get_score_run(score_id)
+        if run is None:
+            raise ValueError(f"no such score run: {score_id}")
+        problems = scoring_engine.verify_score_run(self.store, run)
+        return {"score_id": score_id, "verified": not problems,
+                "problems": problems}
+
+    def list_score_refusals(self, crop_year=None,
+                            season=None) -> list[dict]:
+        return self.store.list_score_refusals(crop_year, season)
 
     def brief_html(self, brief_id) -> str | None:
         brief = self.get_brief(brief_id)
