@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 
+from . import access as access_engine
+from . import access_rules as access_pack
 from . import alert_rules as alert_pack
 from . import board as board_engine
 from . import brief as brief_engine
@@ -1510,10 +1512,17 @@ class MarketService:
         artefact = brief_engine.build_pack(
             pack_kind, pack_key, as_of, exported_by, tables, appendix)
         existing = self.store.get_export_pack(artefact.pack_id)
-        if existing is not None:
-            return existing
-        self.store.insert_export_pack(artefact.model_dump())
-        log.info("export pack stored: %s", artefact.pack_id)
+        if existing is None:
+            self.store.insert_export_pack(artefact.model_dump())
+            log.info("export pack stored: %s", artefact.pack_id)
+        # R15: every export is audited — an insert-only
+        # access entry names the pack, the exporter and
+        # the export date, and reconciles one-to-one with
+        # the pack artefact (access.verify_access_log).
+        access_engine.record_entry(
+            self.store, exported_by.strip(),
+            access_pack.SURFACE_EXPORT, artefact.pack_id,
+            None, None, as_of)
         return self.store.get_export_pack(artefact.pack_id)
 
     def get_pack(self, pack_id) -> dict | None:
@@ -2134,6 +2143,99 @@ class MarketService:
                                 season=None) -> list[dict]:
         return self.store.list_readiness_refusals(
             region, crop_year, season)
+
+    # -- role scopes & the access audit log (R15) ---------
+
+    def principal_scope(self, principal_name) -> dict:
+        """One reader's judged identity from the access
+        pack's register: role, remit, and whether the
+        name is registered at all."""
+        return access_engine.resolve_principal(principal_name)
+
+    def scoped_districts(self, principal_name) -> list[dict]:
+        """The district register as this reader may
+        enumerate it — a regional reader's list holds
+        only their regions' districts; the rest are not
+        named, counted or hinted at."""
+        principal = access_engine.resolve_principal(principal_name)
+        return access_engine.visible_districts(self.store, principal)
+
+    def scoped_competitor_observation(self, principal_name,
+                                      observation_id, at) -> dict | None:
+        """One competitor observation through the guard.
+        An in-scope read returns the artefact; anything
+        else returns None — exactly what a missing
+        observation returns — and every outcome appends
+        its access entry."""
+        row = self.store.get_competitor_observation(observation_id)
+        district_id = row["district_id"] if row else None
+        product = row["product"] if row else None
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_COMPETITOR,
+            f"competitor_observation:{observation_id}",
+            district_id, product, at)
+        if row is None \
+                or entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        return row
+
+    def scoped_competitor_observations(self, principal_name, at,
+                                       competitor=None, region=None,
+                                       product=None,
+                                       season=None) -> list[dict]:
+        """The competitor observation list through the
+        guard: only observations inside the reader's
+        remit appear — the rest are absent, not flagged.
+        One access entry records the list read, judged
+        on the read's own stated filters."""
+        principal = access_engine.resolve_principal(principal_name)
+        rows = self.store.list_competitor_observations(
+            competitor, region, product, season)
+        visible = []
+        for row in rows:
+            judged = access_engine.decide(
+                self.store, principal,
+                access_pack.SURFACE_COMPETITOR,
+                row["district_id"], row["product"])
+            if judged["decision"] == access_pack.DECISION_ALLOWED:
+                visible.append(row)
+        access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_COMPETITOR,
+            "competitor_observations", None, product, at)
+        return visible
+
+    def scoped_market_share(self, principal_name, district_id,
+                            product, crop_year, season, at,
+                            as_of=None) -> dict | None:
+        """The head market share through the guard: the
+        share is computed-or-returned only for a reader
+        whose remit covers the district and product;
+        anyone else reads None, as if no share existed,
+        and the decision is logged either way."""
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_COMPETITOR,
+            f"market_share:{district_id}:{product}:"
+            f"{crop_year}:{season}",
+            district_id, product, at)
+        if entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        return self.market_share(
+            district_id, product, crop_year, season, as_of)
+
+    def access_log(self) -> list[dict]:
+        """The access audit log, re-derived from the
+        entries alone with its gapless sequence."""
+        return access_engine.derive_access_log(
+            self.store.list_access_entries())
+
+    def verify_access_log(self) -> dict:
+        entries = self.store.list_access_entries()
+        problems = access_engine.verify_access_log(self.store)
+        return {"entries": len(entries),
+                "verified": not problems, "problems": problems}
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is
