@@ -340,6 +340,30 @@ Round 12 adds the scoring & depth counters (all zero-tolerance):
                                    tonnage or recovery, or a
                                    gap on the path that does
                                    not re-perform
+
+Round 14 adds the rollup, territory pack & readiness counters
+(all zero-tolerance):
+  - rollup_identity_errors ....... a rollup region or national
+                                   figure that is not the sum of
+                                   the outlook's member estimates
+                                   as stored, a member line or
+                                   gap line that is not the named
+                                   artefact's own, or a rollup
+                                   the verifier cannot re-perform
+  - rollup_naming_errors ......... a partial or missing district
+                                   not named exactly as the member
+                                   rows and the register derive it
+  - territory_pack_figure_errors . a territory pack figure that
+                                   is not exactly its rollup's
+                                   figure, or a tampered pack file
+                                   the manifest does not name
+  - readiness_blocking_errors .... a readiness line whose status
+                                   disagrees with the record folded
+                                   here from the acts and heads
+                                   alone, a blocking list or ready
+                                   verdict that disagrees with its
+                                   lines, or a publication that
+                                   fails to flip the outlook line
 """
 
 from __future__ import annotations
@@ -2420,7 +2444,327 @@ def main() -> int:
         if not service.verify_queue("2026-03-03")["verified"]:
             counters["queue_act_errors"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13 evals — fertilizer market intelligence")
+    # --- Round 14: rollups, territory packs, readiness -----
+    # Every rollup figure is re-summed here from the estimate
+    # rows the head outlook names; partial and missing
+    # districts are re-derived from those rows and the
+    # register; the territory pack is compared figure by
+    # figure against the rollup it names; and the readiness
+    # plan's four lines are folded independently from the
+    # publication acts, the gap heads, the alert and queue
+    # acts, and the field reports with their review acts.
+    counters.setdefault("rollup_identity_errors", 0)
+    counters.setdefault("rollup_naming_errors", 0)
+    counters.setdefault("territory_pack_figure_errors", 0)
+    counters.setdefault("readiness_blocking_errors", 0)
+
+    districts14 = {d["district_id"]: d
+                   for d in store.list_districts()}
+    products14 = ["UREA", "DAP", "NPK_10_26_26", "MOP",
+                  "GLYPHOSATE", "CHLORPYRIFOS"]
+
+    def _head14(rows, id_key):
+        superseded = {r["supersedes"] for r in rows
+                      if r.get("supersedes")}
+        heads = [r for r in rows if r[id_key] not in superseded]
+        return heads[0] if heads else None
+
+    for season14 in ("kharif", "rabi"):
+        rollup14 = service.regional_rollup(
+            "2025-26", season14, "eval desk", "2026-03-01")
+        if not service.verify_rollup(rollup14["rollup_id"])[
+                "verified"]:
+            counters["rollup_identity_errors"] += 1
+        outlook14 = _head14(
+            store.list_outlooks("2025-26", season14), "outlook_id")
+        if rollup14["outlook_id"] != outlook14["outlook_id"]:
+            counters["rollup_identity_errors"] += 1
+        wanted14 = set(outlook14["estimate_ids"])
+        rows14 = [r for r in store.list_estimates(
+            crop_year="2025-26", season=season14)
+            if r["estimate_id"] in wanted14]
+        stated14 = {b["product"]: b for b in rollup14["products"]}
+        grand14 = 0.0
+        for product14 in products14:
+            block14 = stated14[product14]
+            members14 = [r for r in rows14
+                         if r["product"] == product14]
+            if sorted(m["estimate_id"] for m in block14["members"]) \
+                    != sorted(r["estimate_id"] for r in members14):
+                counters["rollup_identity_errors"] += 1
+            by_id14 = {r["estimate_id"]: r for r in members14}
+            for mrow14 in block14["members"]:
+                src14 = by_id14.get(mrow14["estimate_id"])
+                if src14 is None \
+                        or mrow14["total_tonnes"] != src14[
+                            "total_tonnes"] \
+                        or mrow14["status"] != src14["status"]:
+                    counters["rollup_identity_errors"] += 1
+            member_districts14 = {r["district_id"] for r in members14}
+            for region_row14 in block14["regions"]:
+                region_members14 = [
+                    r for r in members14
+                    if districts14[r["district_id"]]["region"]
+                    == region_row14["region"]]
+                if abs(region_row14["total_tonnes"] - round(
+                        sum(r["total_tonnes"]
+                            for r in region_members14), 3)) > 0.0011:
+                    counters["rollup_identity_errors"] += 1
+                if region_row14["estimate_count"] != len(
+                        region_members14):
+                    counters["rollup_identity_errors"] += 1
+                want_partial14 = sorted(
+                    districts14[r["district_id"]]["name"]
+                    for r in region_members14
+                    if r["status"] == "partial")
+                want_missing14 = sorted(
+                    d["name"] for d in districts14.values()
+                    if d["region"] == region_row14["region"]
+                    and d["district_id"] not in member_districts14)
+                if region_row14["partial_districts"] \
+                        != want_partial14 \
+                        or region_row14["missing_districts"] \
+                        != want_missing14:
+                    counters["rollup_naming_errors"] += 1
+            if abs(block14["national_tonnes"] - round(
+                    sum(r["total_tonnes"] for r in members14),
+                    3)) > 0.0011:
+                counters["rollup_identity_errors"] += 1
+            grand14 += block14["national_tonnes"]
+            gap_head14 = _head14(
+                store.list_gaps(product14, "2025-26", season14),
+                "gap_id")
+            if gap_head14 is None:
+                if block14["gap"] is not None:
+                    counters["rollup_identity_errors"] += 1
+            else:
+                g14 = block14["gap"]
+                if g14 is None \
+                        or g14["gap_id"] != gap_head14["gap_id"] \
+                        or g14["gap_tonnes"] != gap_head14[
+                            "gap_tonnes"] \
+                        or g14["demand_tonnes"] != gap_head14[
+                            "demand_tonnes"]:
+                    counters["rollup_identity_errors"] += 1
+                elif g14["demand_basis"] == "this_outlook" \
+                        and abs(g14["demand_tonnes"]
+                                - block14["national_tonnes"]) > 0.0011:
+                    counters["rollup_identity_errors"] += 1
+        if abs(rollup14["national_total_tonnes"] - grand14) > 0.0011:
+            counters["rollup_identity_errors"] += 1
+        want_partial_all14 = sorted({
+            districts14[r["district_id"]]["name"] for r in rows14
+            if r["status"] == "partial"})
+        want_missing_all14 = sorted({
+            d["name"] for p14 in products14
+            for d in districts14.values()
+            if d["district_id"] not in {
+                r["district_id"] for r in rows14
+                if r["product"] == p14}})
+        if rollup14["partial_districts"] != want_partial_all14 \
+                or rollup14["missing_districts"] \
+                != want_missing_all14:
+            counters["rollup_naming_errors"] += 1
+
+    # The territory pack: every figure exactly its rollup's.
+    pack14 = service.export_pack(
+        "territory", "south", "eval desk", "2026-03-01")
+    if not service.verify_pack(pack14["pack_id"])["verified"]:
+        counters["territory_pack_figure_errors"] += 1
+    named14 = {row["rollup_id"] for row in pack14["tables"]["rollup"]}
+    if len(named14) != 1:
+        counters["territory_pack_figure_errors"] += 1
+    rollup_pack14 = service.get_rollup(named14.pop()) if named14 \
+        else None
+    if rollup_pack14 is not None:
+        blocks_pack14 = {b["product"]: b
+                         for b in rollup_pack14["products"]}
+        for row14 in pack14["tables"]["rollup"]:
+            block_p14 = blocks_pack14[row14["product"]]
+            if row14["level"] == "national":
+                if row14["total_tonnes"] != block_p14[
+                        "national_tonnes"] \
+                        or row14["status"] != block_p14["status"]:
+                    counters["territory_pack_figure_errors"] += 1
+            else:
+                region_p14 = next(
+                    r for r in block_p14["regions"]
+                    if r["region"] == row14["region"])
+                if row14["total_tonnes"] != region_p14[
+                        "total_tonnes"] \
+                        or row14["estimate_count"] != region_p14[
+                            "estimate_count"]:
+                    counters["territory_pack_figure_errors"] += 1
+        member_fig14 = {m["estimate_id"]: m
+                        for b in rollup_pack14["products"]
+                        for m in b["members"]}
+        for row14 in pack14["tables"]["districts"]:
+            src14 = member_fig14.get(row14["estimate_id"])
+            if src14 is None \
+                    or row14["total_tonnes"] != src14[
+                        "total_tonnes"] \
+                    or row14["region"] != "south":
+                counters["territory_pack_figure_errors"] += 1
+        for row14 in pack14["tables"]["gaps"]:
+            gsrc14 = blocks_pack14[row14["product"]]["gap"]
+            if gsrc14 is None \
+                    or row14["gap_id"] != gsrc14["gap_id"] \
+                    or row14["gap_tonnes"] != gsrc14["gap_tonnes"]:
+                counters["territory_pack_figure_errors"] += 1
+    with tempfile.TemporaryDirectory() as td14:
+        service.write_pack(pack14["pack_id"], td14)
+        target14 = Path(td14) / "gaps.csv"
+        data14 = bytearray(target14.read_bytes())
+        data14[10] = ord("9") if data14[10] != ord("9") else ord("1")
+        target14.write_bytes(bytes(data14))
+        result14 = service.verify_pack_dir(pack14["pack_id"], td14)
+        if result14["verified"] or not any(
+                "gaps.csv" in p for p in result14["problems"]):
+            counters["territory_pack_figure_errors"] += 1
+
+    # Readiness for the south, folded here from the record.
+    asof14 = "2026-03-01"
+    plan14 = service.season_readiness(
+        "south", "2025-26", "kharif", "eval desk", asof14)
+    if not service.verify_readiness(plan14["readiness_id"])[
+            "verified"]:
+        counters["readiness_blocking_errors"] += 1
+    lines14 = {line["line"]: line for line in plan14["lines"]}
+
+    outlook_head14 = _head14(
+        store.list_outlooks("2025-26", "kharif"), "outlook_id")
+    fam_acts14 = sorted(
+        (a for a in store.list_publication_acts()
+         if a["artefact_kind"] == "season_outlook"
+         and a["published_at"] <= asof14),
+        key=lambda a: (a["published_at"], a["act_id"]))
+    published_id14 = fam_acts14[-1]["artefact_id"] if fam_acts14 \
+        else None
+    outlook_complete14 = published_id14 == outlook_head14[
+        "outlook_id"]
+    if lines14["outlook_published"]["figures"]["outlook_id"] \
+            != outlook_head14["outlook_id"]:
+        counters["readiness_blocking_errors"] += 1
+    if (lines14["outlook_published"]["status"] == "complete") \
+            != outlook_complete14:
+        counters["readiness_blocking_errors"] += 1
+
+    positionable14 = {r["product"] for r in store.supply_facts()} \
+        | {a["product"] for a in store.import_arrivals()}
+    cover_complete14 = True
+    cover_fig14 = {r["product"]: r for r in
+                   lines14["supply_cover"]["figures"]["products"]}
+    for product14 in sorted(positionable14):
+        ghead14 = _head14(
+            store.list_gaps(product14, "2025-26", "kharif"),
+            "gap_id")
+        if ghead14 is None or ghead14["band"] == "short":
+            cover_complete14 = False
+        row14 = cover_fig14.get(product14)
+        if row14 is None or (ghead14 is not None
+                             and row14["gap_id"] != ghead14[
+                                 "gap_id"]):
+            counters["readiness_blocking_errors"] += 1
+    if (lines14["supply_cover"]["status"] == "complete") \
+            != cover_complete14:
+        counters["readiness_blocking_errors"] += 1
+
+    open_alert_ids14 = set()
+    for alert14 in store.list_alerts():
+        state14 = "open"
+        for act14 in store.list_alert_acts(alert14["alert_id"]):
+            if act14["as_of"] > asof14:
+                continue
+            if act14["act"] == "acknowledge":
+                state14 = "acknowledged"
+            elif act14["act"] == "close":
+                state14 = "closed"
+        if state14 == "open":
+            open_alert_ids14.add(alert14["alert_id"])
+    unowned14 = set()
+    items14 = {i["gap_id"]: i for i in store.list_queue_items()}
+    for product14 in products14:
+        head14 = _head14(
+            store.list_gaps(product14, "2025-26", "kharif"),
+            "gap_id")
+        if head14 is None or head14["band"] != "short":
+            continue
+        item14 = items14.get(head14["gap_id"])
+        if item14 is None:
+            unowned14.add(head14["gap_id"])
+            continue
+        acts14 = [a for a in store.list_queue_acts(
+            item14["item_id"]) if a["as_of"] <= asof14]
+        if not any(a["act"] == "assign" for a in acts14) \
+                and not any(a["act"] == "close" for a in acts14):
+            unowned14.add(head14["gap_id"])
+    plan_alerts14 = {r["alert_id"] for r in
+                     lines14["open_risks"]["figures"]["open_alerts"]}
+    plan_unowned14 = {r["gap_id"] for r in
+                      lines14["open_risks"]["figures"][
+                          "unowned_short_gaps"]}
+    if plan_alerts14 != open_alert_ids14 \
+            or plan_unowned14 != unowned14:
+        counters["readiness_blocking_errors"] += 1
+    risks_complete14 = not open_alert_ids14 and not unowned14
+    if (lines14["open_risks"]["status"] == "complete") \
+            != risks_complete14:
+        counters["readiness_blocking_errors"] += 1
+
+    south_ids14 = {d["district_id"] for d in districts14.values()
+                   if d["region"] == "south"}
+    covered14 = set()
+    for rep14 in store.list_field_report_artefacts():
+        if rep14["district_id"] not in south_ids14 \
+                or rep14["crop_year"] != "2025-26" \
+                or rep14["season"] != "kharif" \
+                or rep14["as_of"] > asof14:
+            continue
+        acts14 = [a for a in store.list_field_review_acts(
+            rep14["report_id"]) if a["as_of"] <= asof14]
+        if any(a["act"] == "reject" for a in acts14):
+            state14 = "rejected"
+        elif not acts14:
+            state14 = "unreviewed"
+        elif acts14[-1]["act"] == "confirm":
+            state14 = "confirmed"
+        else:
+            state14 = "queried"
+        if state14 == "confirmed":
+            covered14.add(rep14["district_id"])
+    field_complete14 = covered14 == south_ids14
+    if (lines14["field_coverage"]["status"] == "complete") \
+            != field_complete14:
+        counters["readiness_blocking_errors"] += 1
+
+    expected_blocking14 = [
+        name for name, ok14 in (
+            ("outlook_published", outlook_complete14),
+            ("supply_cover", cover_complete14),
+            ("open_risks", risks_complete14),
+            ("field_coverage", field_complete14))
+        if not ok14]
+    if plan14["blocking_lines"] != expected_blocking14:
+        counters["readiness_blocking_errors"] += 1
+    if plan14["ready"] != (not expected_blocking14):
+        counters["readiness_blocking_errors"] += 1
+
+    # Publishing the head outlook flips exactly that line.
+    service.publish_artefact(
+        "season_outlook", outlook_head14["outlook_id"],
+        "evals publisher", "2026-03-02")
+    plan14b = service.season_readiness(
+        "south", "2025-26", "kharif", "eval desk", "2026-03-05")
+    lines14b = {line["line"]: line for line in plan14b["lines"]}
+    if lines14b["outlook_published"]["status"] != "complete":
+        counters["readiness_blocking_errors"] += 1
+    if plan14b["supersedes"] != plan14["readiness_id"]:
+        counters["readiness_blocking_errors"] += 1
+    if not service.verify_readiness(plan14b["readiness_id"])[
+            "verified"]:
+        counters["readiness_blocking_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
