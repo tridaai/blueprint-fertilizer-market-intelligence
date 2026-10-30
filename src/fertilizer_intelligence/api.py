@@ -24,6 +24,7 @@ from .logging_config import configure_logging, new_request_id, request_id_var
 from .market_map import MapRefused
 from .movements import AlertStateError
 from .notes import FollowupStateError
+from .notify import SubscriptionRefused
 from .queue import QueueStateError
 from .readiness import ReadinessRefused
 from .review import ReviewRefused
@@ -254,6 +255,21 @@ class FollowupActRequest(BaseModel):
 
 class ReviewQueueRequest(BaseModel):
     struck_by: str
+    as_of: str
+
+
+class SubscriptionRequest(BaseModel):
+    principal: str
+    struck_by: str
+    at: str
+    classes: list[str]
+    products: list[str] = []
+    regions: list[str] = []
+    floors: dict = {}
+
+
+class DigestRequest(BaseModel):
+    subscription_id: str
     as_of: str
 
 
@@ -1788,6 +1804,106 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/review-refusals")
     def list_review_refusals() -> list[dict]:
         return service.list_review_refusals()
+
+    # -- subscriptions, deliveries & escalation (R16) ---
+
+    @app.post("/subscriptions")
+    def subscribe(body: SubscriptionRequest) -> dict:
+        try:
+            return service.subscribe(
+                body.principal, body.struck_by, body.at,
+                body.classes, body.products, body.regions,
+                body.floors)
+        except SubscriptionRefused as exc:
+            raise HTTPException(
+                status_code=403,
+                detail={"entry_id": exc.entry_id,
+                        "reason": exc.reason}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/subscriptions")
+    def list_subscriptions(
+        principal: str | None = None,
+    ) -> list[dict]:
+        return service.list_subscriptions(principal)
+
+    @app.get("/subscriptions/verify")
+    def verify_subscriptions(as_of: str) -> dict:
+        return service.verify_subscriptions(as_of)
+
+    @app.get("/subscriptions/{subscription_id}")
+    def get_subscription(subscription_id: str) -> dict:
+        row = service.get_subscription(subscription_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such subscription: {subscription_id}")
+        return row
+
+    @app.get("/notices")
+    def list_notices() -> list[dict]:
+        return service.notices()
+
+    @app.get("/deliveries")
+    def list_deliveries(
+        as_of: str, principal: str | None = None,
+    ) -> list[dict]:
+        return service.deliveries(as_of, principal)
+
+    @app.get("/deliveries/undelivered")
+    def undelivered_counts(as_of: str) -> dict:
+        return service.undelivered_counts(as_of)
+
+    @app.get("/escalations")
+    def list_escalations(as_of: str) -> list[dict]:
+        return service.escalations(as_of)
+
+    @app.get("/scoped/alerts/{alert_id}")
+    def scoped_alert(
+        alert_id: str, principal: str, at: str,
+    ) -> dict:
+        row = service.scoped_alert(principal, alert_id, at)
+        if row is None:
+            # Existence hiding: out of scope reads exactly
+            # as absent — the same 404 a missing alert
+            # gets, with no distinguishing detail.
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such price alert: {alert_id}")
+        return row
+
+    @app.post("/digests")
+    def strike_digest(body: DigestRequest) -> dict:
+        try:
+            return service.strike_digest(
+                body.subscription_id, body.as_of)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/digests")
+    def list_digests(
+        subscription_id: str | None = None,
+        principal: str | None = None,
+    ) -> list[dict]:
+        return service.list_digests(subscription_id, principal)
+
+    @app.get("/digests/{digest_id}")
+    def get_digest(digest_id: str) -> dict:
+        row = service.get_digest(digest_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such digest: {digest_id}")
+        return row
+
+    @app.get("/digests/{digest_id}/text")
+    def digest_text(digest_id: str):
+        from fastapi.responses import PlainTextResponse
+        try:
+            return PlainTextResponse(service.digest_text(digest_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
 

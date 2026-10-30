@@ -36,6 +36,7 @@ from .board import BoardRefused
 from .brief import BriefRefused
 from .market_map import MapRefused
 from .notes import FollowupStateError
+from .notify import SubscriptionRefused
 from .queue import QueueStateError
 from .readiness import ReadinessRefused
 from .review import ReviewRefused
@@ -606,6 +607,59 @@ def main(argv=None) -> int:
     p.add_argument("queue_id")
 
     p = sub.add_parser("review-refusals", help="list recorded review queue refusals")
+
+    p = sub.add_parser("subscribe", help="strike a subscription version for a register reader (judged by the access pack)")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--classes", required=True,
+                   help="comma-joined notice classes: price,gap,policy")
+    p.add_argument("--products", default=None,
+                   help="comma-joined item filter (empty = all)")
+    p.add_argument("--regions", default=None,
+                   help="comma-joined region filter (empty = all)")
+    p.add_argument("--floors", default=None,
+                   help="comma-joined class=severity floors, e.g. price=alert,gap=short")
+
+    p = sub.add_parser("subscriptions", help="list subscription artefacts, optionally by reader")
+    p.add_argument("--principal", default=None)
+
+    p = sub.add_parser("get-subscription", help="read one subscription artefact")
+    p.add_argument("subscription_id")
+
+    p = sub.add_parser("notices", help="the deliverable units as they stand, per class")
+
+    p = sub.add_parser("deliveries", help="the deliveries derived at a date")
+    p.add_argument("--as-of", required=True)
+    p.add_argument("--principal", default=None)
+
+    p = sub.add_parser("undelivered", help="notices no subscription reaches at a date, per class")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("escalations", help="alert-band price alerts' escalation state at a date")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("scoped-alert", help="one price alert through a reader's scope (existence hiding)")
+    p.add_argument("alert_id")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("digest", help="freeze one subscription version's digest at a date")
+    p.add_argument("--subscription", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("digests", help="list stored digests")
+    p.add_argument("--subscription", default=None)
+    p.add_argument("--principal", default=None)
+
+    p = sub.add_parser("get-digest", help="read one stored digest")
+    p.add_argument("digest_id")
+
+    p = sub.add_parser("digest-text", help="a digest's low-bandwidth text form")
+    p.add_argument("digest_id")
+
+    p = sub.add_parser("verify-subscriptions", help="re-perform subscriptions, deliveries, escalations and digests")
+    p.add_argument("--as-of", required=True)
 
     p = sub.add_parser("pack", help="export a product, region or territory report pack")
     p.add_argument("--kind", required=True, choices=["product", "region", "territory"])
@@ -1299,6 +1353,60 @@ def main(argv=None) -> int:
             result = service.verify_review_queue(args.queue_id)
         elif args.command == "review-refusals":
             result = service.list_review_refusals()
+        elif args.command == "subscribe":
+            floors = {}
+            if args.floors:
+                for pair in args.floors.split(","):
+                    key, _, value = pair.partition("=")
+                    floors[key.strip()] = value.strip()
+            result = service.subscribe(
+                args.principal, args.by, args.at,
+                [c.strip() for c in args.classes.split(",")],
+                [p.strip() for p in args.products.split(",")]
+                if args.products else [],
+                [r.strip() for r in args.regions.split(",")]
+                if args.regions else [],
+                floors)
+        elif args.command == "subscriptions":
+            result = service.list_subscriptions(args.principal)
+        elif args.command == "get-subscription":
+            result = service.get_subscription(args.subscription_id)
+            if result is None:
+                print(f"no such subscription: "
+                      f"{args.subscription_id}", file=sys.stderr)
+                return 2
+        elif args.command == "notices":
+            result = service.notices()
+        elif args.command == "deliveries":
+            result = service.deliveries(args.as_of, args.principal)
+        elif args.command == "undelivered":
+            result = service.undelivered_counts(args.as_of)
+        elif args.command == "escalations":
+            result = service.escalations(args.as_of)
+        elif args.command == "scoped-alert":
+            result = service.scoped_alert(
+                args.principal, args.alert_id, args.at)
+            if result is None:
+                print(f"no such price alert: {args.alert_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "digest":
+            result = service.strike_digest(
+                args.subscription, args.as_of)
+        elif args.command == "digests":
+            result = service.list_digests(
+                args.subscription, args.principal)
+        elif args.command == "get-digest":
+            result = service.get_digest(args.digest_id)
+            if result is None:
+                print(f"no such digest: {args.digest_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "digest-text":
+            print(service.digest_text(args.digest_id), end="")
+            return 0
+        elif args.command == "verify-subscriptions":
+            result = service.verify_subscriptions(args.as_of)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:
@@ -1334,6 +1442,11 @@ def main(argv=None) -> int:
     except ReviewRefused as exc:
         print(json.dumps(
             {"refused": exc.problems, "refusal_id": exc.refusal_id},
+            indent=2), file=sys.stderr)
+        return 2
+    except SubscriptionRefused as exc:
+        print(json.dumps(
+            {"refused": exc.reason, "entry_id": exc.entry_id},
             indent=2), file=sys.stderr)
         return 2
     except FollowupStateError as exc:

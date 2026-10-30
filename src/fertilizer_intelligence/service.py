@@ -27,6 +27,7 @@ from . import market_map as map_engine
 from . import movements as movement_engine
 from . import notes as notes_engine
 from . import notes_rules as notes_pack
+from . import notify as notify_engine
 from . import policy as policy_engine
 from . import queue as queue_engine
 from . import queue_rules as queue_pack
@@ -2410,6 +2411,159 @@ class MarketService:
 
     def list_review_refusals(self) -> list[dict]:
         return self.store.list_review_refusals()
+
+    # -- subscriptions, deliveries & escalation (R16) ---
+
+    def subscribe(self, principal_name, struck_by, at,
+                  classes, products=None, regions=None,
+                  floors=None) -> dict:
+        """Strike one subscription version for a named
+        reader of the register. The access pack judges
+        the strike first — subscriber, actor and reach
+        — and its decision is in the access log either
+        way; a judged refusal raises and stores nothing.
+        An allowed strike supersedes the principal's
+        current head by link; the same strike repeated
+        is the same artefact."""
+        if not principal_name or not principal_name.strip():
+            raise ValueError("a subscription names its reader")
+        if not struck_by or not struck_by.strip():
+            raise ValueError("a subscription names who struck it")
+        head = demand_engine.head_of(
+            self.store.list_subscriptions(principal_name.strip()),
+            "subscription_id")
+        artefact = notify_engine.build_subscription(
+            principal_name.strip(), struck_by.strip(), at,
+            classes, products, regions, floors,
+            supersedes=head["subscription_id"] if head else None)
+        entry = access_engine.record_entry(
+            self.store, struck_by.strip(),
+            access_pack.SURFACE_SUBSCRIPTION,
+            artefact.subscription_id, None, None, at,
+            subscriber=principal_name.strip(),
+            reach_products=tuple(artefact.products),
+            reach_regions=tuple(artefact.regions))
+        if entry["decision"] != access_pack.DECISION_ALLOWED:
+            raise notify_engine.SubscriptionRefused(
+                entry["reason"], entry["entry_id"])
+        existing = self.store.get_subscription(
+            artefact.subscription_id)
+        if existing is not None:
+            return existing
+        self.store.insert_subscription(artefact.model_dump())
+        log.info("subscription stored: %s", artefact.subscription_id)
+        return self.store.get_subscription(artefact.subscription_id)
+
+    def get_subscription(self, subscription_id) -> dict | None:
+        return self.store.get_subscription(subscription_id)
+
+    def list_subscriptions(self, principal_name=None) -> list[dict]:
+        return self.store.list_subscriptions(principal_name)
+
+    def notices(self) -> list[dict]:
+        """The deliverable units as they stand: price
+        alerts, non-comfortable gap heads, current
+        policy heads — policy counted as its own class,
+        never as price alerts."""
+        return notify_engine.list_notices(self.store)
+
+    def deliveries(self, as_of, principal_name=None) -> list[dict]:
+        """The deliveries derived at a date: notices ×
+        the subscription versions in force when each
+        notice was struck × the register's remit.
+        Derived, never authored — a delivery is evidence
+        an alert reached a subscriber, not a state
+        change on the alert."""
+        rows = notify_engine.derive_deliveries(self.store, as_of)
+        if principal_name is not None:
+            rows = [d for d in rows
+                    if d["principal"] == principal_name]
+        return rows
+
+    def undelivered_counts(self, as_of) -> dict:
+        """Notices no subscription reaches at a date,
+        per class — undelivered by design."""
+        return notify_engine.undelivered_counts(self.store, as_of)
+
+    def escalations(self, as_of) -> list[dict]:
+        """Every alert-band price alert's escalation
+        state at a date, derived from its acts and the
+        clock — no background job's word for it."""
+        return notify_engine.derive_escalations(self.store, as_of)
+
+    def scoped_alert(self, principal_name, alert_id, at) -> dict | None:
+        """One price alert through the guard (R15
+        existence hiding, applied to alerts): an
+        in-scope read returns the alert with its folded
+        state; anything else returns None — exactly
+        what a missing alert returns — and every outcome
+        appends its access entry. The view carries the
+        alert's escalation state at the read date."""
+        row = self.store.get_alert(alert_id)
+        item = row["item"] if row else None
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_ALERT_READ,
+            f"price_alert:{alert_id}", None, item, at)
+        if row is None \
+                or entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        view = self._alert_with_state(row)
+        view["escalation"] = notify_engine.escalation_for(
+            self.store, row, at)
+        return view
+
+    def strike_digest(self, subscription_id, as_of) -> dict:
+        """Freeze one subscription version's delivery
+        set and escalations at a generation date as a
+        digest artefact. Regenerating at a later date
+        is a new artefact superseding the family's head
+        — never an edit."""
+        sub = self.store.get_subscription(subscription_id)
+        if sub is None:
+            raise ValueError(
+                f"no such subscription: {subscription_id}")
+        candidate = notify_engine.build_digest(
+            self.store, sub, as_of)
+        existing = self.store.get_digest(candidate.digest_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_digests(subscription_id), "digest_id")
+        if head is not None and head["as_of"] == as_of \
+                and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["digest_id"] if head else None})
+        self.store.insert_digest(candidate.model_dump())
+        log.info("digest stored: %s", candidate.digest_id)
+        return self.store.get_digest(candidate.digest_id)
+
+    def get_digest(self, digest_id) -> dict | None:
+        return self.store.get_digest(digest_id)
+
+    def list_digests(self, subscription_id=None,
+                     principal_name=None) -> list[dict]:
+        return self.store.list_digests(subscription_id,
+                                       principal_name)
+
+    def digest_text(self, digest_id) -> str:
+        """A digest's low-bandwidth text form — the same
+        content, as plain lines."""
+        row = self.store.get_digest(digest_id)
+        if row is None:
+            raise ValueError(f"no such digest: {digest_id}")
+        return notify_engine.render_digest_text(row)
+
+    def verify_subscriptions(self, as_of) -> dict:
+        problems = notify_engine.verify_subscriptions(
+            self.store, as_of)
+        return {
+            "subscriptions": len(self.store.list_subscriptions()),
+            "digests": len(self.store.list_digests()),
+            "deliveries": len(
+                notify_engine.derive_deliveries(self.store, as_of)),
+            "verified": not problems, "problems": problems}
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is
