@@ -20,6 +20,7 @@ from .config import Settings
 from .dashboard import DashboardRefused
 from .demand import NarrativeRefused
 from .field import FieldReviewError
+from .integrity import ScreeningError
 from .logging_config import configure_logging, new_request_id, request_id_var
 from .market_map import MapRefused
 from .movements import AlertStateError
@@ -270,6 +271,16 @@ class SubscriptionRequest(BaseModel):
 
 class DigestRequest(BaseModel):
     subscription_id: str
+    as_of: str
+
+
+class ScreeningReleaseRequest(BaseModel):
+    actor: str
+    reason: str
+    as_of: str | None = None
+
+
+class IntegrityBoardRequest(BaseModel):
     as_of: str
 
 
@@ -1904,6 +1915,89 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return PlainTextResponse(service.digest_text(digest_id))
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # -- field screening & reporter integrity (R17) ---
+
+    @app.get("/field-signals/{report_id}/screening")
+    def get_field_screening(report_id: str) -> dict:
+        row = service.field_screening(report_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such field report: {report_id}")
+        return row
+
+    @app.get("/field-signals/{report_id}/context")
+    def get_field_context(report_id: str) -> dict:
+        row = service.field_context(report_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such field report: {report_id}")
+        return row
+
+    @app.get("/scoped/field-screenings/{report_id}")
+    def scoped_field_screening(
+        report_id: str, principal: str, at: str,
+    ) -> dict:
+        row = service.scoped_screening(principal, report_id, at)
+        if row is None:
+            # Existence hiding: out of scope reads exactly
+            # as absent — the same 404 a missing report
+            # gets, with no distinguishing detail.
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such field report: {report_id}")
+        return row
+
+    @app.post("/field-signals/{report_id}/screening/release")
+    def release_field_screening(
+        report_id: str, body: ScreeningReleaseRequest,
+    ) -> dict:
+        if service.get_field_report(report_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such field report: {report_id}")
+        try:
+            return service.release_screening(
+                report_id, body.actor, body.reason,
+                body.as_of or date.today().isoformat())
+        except ScreeningError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/integrity-boards")
+    def strike_integrity_board(body: IntegrityBoardRequest) -> dict:
+        return service.strike_integrity_board(body.as_of)
+
+    @app.get("/integrity-boards")
+    def list_integrity_boards() -> list[dict]:
+        return service.list_integrity_boards()
+
+    @app.get("/integrity-boards/{board_id}")
+    def get_integrity_board(board_id: str) -> dict:
+        row = service.get_integrity_board(board_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such integrity board: {board_id}")
+        return row
+
+    @app.get("/scoped/integrity-boards/{board_id}")
+    def scoped_integrity_board(
+        board_id: str, principal: str, at: str,
+    ) -> dict:
+        row = service.scoped_integrity_board(principal, board_id, at)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such integrity board: {board_id}")
+        return row
+
+    @app.get("/integrity/verify")
+    def verify_integrity(as_of: str) -> dict:
+        return service.verify_integrity(as_of)
 
     return app
 

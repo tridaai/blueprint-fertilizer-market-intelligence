@@ -36,6 +36,7 @@ from .board import BoardRefused
 from .brief import BriefRefused
 from .market_map import MapRefused
 from .notes import FollowupStateError
+from .integrity import ScreeningError
 from .notify import SubscriptionRefused
 from .queue import QueueStateError
 from .readiness import ReadinessRefused
@@ -659,6 +660,39 @@ def main(argv=None) -> int:
     p.add_argument("digest_id")
 
     p = sub.add_parser("verify-subscriptions", help="re-perform subscriptions, deliveries, escalations and digests")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("field-screening", help="one field report's screening verdict and folded state")
+    p.add_argument("report_id")
+
+    p = sub.add_parser("scoped-screening", help="one field report's note raw, through a reader's scope (existence hiding)")
+    p.add_argument("report_id")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("release-screening", help="release one held field note as a named reviewer (never the reporter)")
+    p.add_argument("report_id")
+    p.add_argument("--actor", required=True)
+    p.add_argument("--reason", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("field-context", help="the structuring context a model would be handed for one field report")
+    p.add_argument("report_id")
+
+    p = sub.add_parser("integrity-board", help="strike the reporter-integrity board at a date (advisory only)")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("integrity-boards", help="list stored reporter-integrity boards")
+
+    p = sub.add_parser("get-integrity-board", help="read one stored integrity board")
+    p.add_argument("board_id")
+
+    p = sub.add_parser("scoped-integrity-board", help="one integrity board through a reader's scope (closed to viewers)")
+    p.add_argument("board_id")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("verify-integrity", help="re-perform screenings, release acts and integrity boards")
     p.add_argument("--as-of", required=True)
 
     p = sub.add_parser("pack", help="export a product, region or territory report pack")
@@ -1407,6 +1441,48 @@ def main(argv=None) -> int:
             return 0
         elif args.command == "verify-subscriptions":
             result = service.verify_subscriptions(args.as_of)
+        elif args.command == "field-screening":
+            result = service.field_screening(args.report_id)
+            if result is None:
+                print(f"no such field report: "
+                      f"{args.report_id}", file=sys.stderr)
+                return 2
+        elif args.command == "scoped-screening":
+            result = service.scoped_screening(
+                args.principal, args.report_id, args.at)
+            if result is None:
+                print(f"no such field report: {args.report_id}",
+                      file=sys.stderr)
+                return 2
+        elif args.command == "release-screening":
+            result = service.release_screening(
+                args.report_id, args.actor, args.reason,
+                args.as_of)
+        elif args.command == "field-context":
+            result = service.field_context(args.report_id)
+            if result is None:
+                print(f"no such field report: "
+                      f"{args.report_id}", file=sys.stderr)
+                return 2
+        elif args.command == "integrity-board":
+            result = service.strike_integrity_board(args.as_of)
+        elif args.command == "integrity-boards":
+            result = service.list_integrity_boards()
+        elif args.command == "get-integrity-board":
+            result = service.get_integrity_board(args.board_id)
+            if result is None:
+                print(f"no such integrity board: "
+                      f"{args.board_id}", file=sys.stderr)
+                return 2
+        elif args.command == "scoped-integrity-board":
+            result = service.scoped_integrity_board(
+                args.principal, args.board_id, args.at)
+            if result is None:
+                print(f"no such integrity board: "
+                      f"{args.board_id}", file=sys.stderr)
+                return 2
+        elif args.command == "verify-integrity":
+            result = service.verify_integrity(args.as_of)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:
@@ -1462,6 +1538,9 @@ def main(argv=None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     except FieldReviewError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except ScreeningError as exc:
         print(str(exc), file=sys.stderr)
         return 2
     except ValueError as exc:
