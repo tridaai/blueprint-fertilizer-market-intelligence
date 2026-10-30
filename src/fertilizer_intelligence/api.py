@@ -284,6 +284,10 @@ class IntegrityBoardRequest(BaseModel):
     as_of: str
 
 
+class MonitoringBoardRequest(BaseModel):
+    as_of: str
+
+
 class PackRequest(BaseModel):
     pack_kind: str
     pack_key: str
@@ -1998,6 +2002,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/integrity/verify")
     def verify_integrity(as_of: str) -> dict:
         return service.verify_integrity(as_of)
+
+    # -- cost, freshness & reliability monitoring (R18) ---
+
+    @app.get("/model-runs")
+    def list_model_runs(
+        purpose: str | None = None,
+        profile: str | None = None,
+    ) -> list[dict]:
+        return service.list_model_runs(
+            purpose=purpose, profile=profile)
+
+    @app.post("/monitoring-boards")
+    def strike_monitoring_board(body: MonitoringBoardRequest) -> dict:
+        return service.strike_monitoring_board(body.as_of)
+
+    @app.get("/monitoring-boards")
+    def list_monitoring_boards() -> list[dict]:
+        return service.list_monitoring_boards()
+
+    @app.get("/monitoring-boards/{board_id}")
+    def get_monitoring_board(board_id: str) -> dict:
+        row = service.get_monitoring_board(board_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such monitoring board: {board_id}")
+        return row
+
+    @app.get("/scoped/monitoring-boards/{board_id}")
+    def scoped_monitoring_board(
+        board_id: str, principal: str, at: str,
+    ) -> dict:
+        row = service.scoped_monitoring_board(principal, board_id, at)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such monitoring board: {board_id}")
+        return row
+
+    @app.get("/monitoring/verify")
+    def verify_monitoring(as_of: str) -> dict:
+        return service.verify_monitoring(as_of)
 
     return app
 

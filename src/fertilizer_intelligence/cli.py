@@ -695,6 +695,26 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-integrity", help="re-perform screenings, release acts and integrity boards")
     p.add_argument("--as-of", required=True)
 
+    p = sub.add_parser("model-runs", help="the run ledger: every recorded model call, in sequence")
+    p.add_argument("--purpose")
+    p.add_argument("--profile")
+
+    p = sub.add_parser("monitoring-board", help="strike the monitoring board at a date (cost, freshness, reliability)")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("monitoring-boards", help="list stored monitoring boards")
+
+    p = sub.add_parser("get-monitoring-board", help="read one stored monitoring board")
+    p.add_argument("board_id")
+
+    p = sub.add_parser("scoped-monitoring-board", help="one monitoring board through a reader's scope (closed to viewers)")
+    p.add_argument("board_id")
+    p.add_argument("--principal", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("verify-monitoring", help="re-perform run records and monitoring boards")
+    p.add_argument("--as-of", required=True)
+
     p = sub.add_parser("pack", help="export a product, region or territory report pack")
     p.add_argument("--kind", required=True, choices=["product", "region", "territory"])
     p.add_argument("--key", required=True)
@@ -1483,6 +1503,28 @@ def main(argv=None) -> int:
                 return 2
         elif args.command == "verify-integrity":
             result = service.verify_integrity(args.as_of)
+        elif args.command == "model-runs":
+            result = service.list_model_runs(
+                purpose=args.purpose, profile=args.profile)
+        elif args.command == "monitoring-board":
+            result = service.strike_monitoring_board(args.as_of)
+        elif args.command == "monitoring-boards":
+            result = service.list_monitoring_boards()
+        elif args.command == "get-monitoring-board":
+            result = service.get_monitoring_board(args.board_id)
+            if result is None:
+                print(f"no such monitoring board: "
+                      f"{args.board_id}", file=sys.stderr)
+                return 2
+        elif args.command == "scoped-monitoring-board":
+            result = service.scoped_monitoring_board(
+                args.principal, args.board_id, args.at)
+            if result is None:
+                print(f"no such monitoring board: "
+                      f"{args.board_id}", file=sys.stderr)
+                return 2
+        elif args.command == "verify-monitoring":
+            result = service.verify_monitoring(args.as_of)
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:
