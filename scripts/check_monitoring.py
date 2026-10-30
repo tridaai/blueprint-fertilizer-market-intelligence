@@ -95,6 +95,27 @@ def main() -> int:
             "nano-USD, not 8100000 (1200 in / 300 out on "
             "the pack's anthropic reference rates)")
 
+    # Every fact lands before the first board is
+    # struck: a board is an as-of snapshot, and a
+    # backdated fact landed after a strike is what
+    # supersession is for.
+    def land(sub_id, detail, reporter):
+        outcome = service.sync_field_reports([{
+            "submission_id": sub_id, "reporter": reporter,
+            "district_id": "DST-GUN", "product": "DAP",
+            "signal_type": "stock_observed",
+            "observed_on": "2026-02-20",
+            "quantity_tonnes": 25.0, "detail": detail,
+            "source": "field_mobile_intake",
+        }], "2026-02-20")
+        return outcome["receipt"][0]["report_id"]
+
+    rep = "C. Checker (field officer)"
+    r1 = land("chk-1", "Depot well stocked.", rep)
+    land("chk-2", "Queue at the depot.", rep)
+    service.review_field_report(
+        r1, "confirm", "A. Rao", "corroborated", "2026-02-21")
+
     # Freshness and source reliability from one batch.
     # The 2026-05 prints sit past the generated series'
     # horizon, so the good rows land.
@@ -141,23 +162,6 @@ def main() -> int:
                         "with the ledger")
     # Reporter reliability: decided rates measured,
     # undecided stated unmeasured.
-    def land(sub_id, detail, reporter):
-        outcome = service.sync_field_reports([{
-            "submission_id": sub_id, "reporter": reporter,
-            "district_id": "DST-GUN", "product": "DAP",
-            "signal_type": "stock_observed",
-            "observed_on": "2026-02-20",
-            "quantity_tonnes": 25.0, "detail": detail,
-            "source": "field_mobile_intake",
-        }], "2026-02-20")
-        return outcome["receipt"][0]["report_id"]
-
-    rep = "C. Checker (field officer)"
-    r1 = land("chk-1", "Depot well stocked.", rep)
-    land("chk-2", "Queue at the depot.", rep)
-    service.review_field_report(
-        r1, "confirm", "A. Rao", "corroborated", "2026-02-21")
-    board = service.strike_monitoring_board("2026-05-13")
     row = next(r for r in board["reliability_reporters"]
                if r["reporter"] == rep)
     if row["confirmation_rate"] != 1.0 or row["decided"] != 1:
@@ -176,10 +180,10 @@ def main() -> int:
     # The guard, and the whole layer re-performed.
     if service.scoped_monitoring_board(
             "Guest Viewer", board["board_id"],
-            "2026-05-13") is not None:
+            "2026-05-12") is not None:
         problems.append("a viewer read the monitoring board")
     if service.scoped_monitoring_board(
-            "A. Rao", board["board_id"], "2026-05-13") is None:
+            "A. Rao", board["board_id"], "2026-05-12") is None:
         problems.append("the strategy desk could not read "
                         "the monitoring board")
     result = service.verify_monitoring("2026-06-05")

@@ -3558,7 +3558,7 @@ def main() -> int:
     def _price18(item, value, **over):
         row = {
             "series_kind": "product", "item": item,
-            "month": "2026-05", "price": value,
+            "month": "2026-06", "price": value,
             "unit": "INR/tonne", "source": "intl_price_feed",
             "as_of": "2026-04-21",
         }
@@ -3567,11 +3567,10 @@ def main() -> int:
 
     _batch18 = service.load_connector_batch(
         "intl_price_feed", [
-            _price18("SSP", 11200.0),
-            _price18("COMPLEX_20_20_0_13", 24800.0,
-                     as_of="2026-04-20"),
-            _price18("SSP", 11200.0),
-            _price18("SSP", -1.0, month="2026-06"),
+            _price18("DAP", 27100.0),
+            _price18("UREA", 5950.0, as_of="2026-04-20"),
+            _price18("DAP", 27100.0),
+            _price18("MOP", -1.0, month="2026-07"),
         ], "eval desk", "2026-04-22")
     if _batch18["received"] != 4 or sum(
             _batch18[k] for k in (
