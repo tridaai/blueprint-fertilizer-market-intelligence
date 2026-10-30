@@ -539,8 +539,12 @@ def verify_integrity(store, as_of: str) -> list[str]:
                 "which is not in the store")
             continue
         rebuilt = build_screening(report)
-        if rebuilt.screening_id != screening["screening_id"] \
-                or rebuilt.fingerprint != screening["fingerprint"]:
+        if any(rebuilt.model_dump()[field] != screening[field]
+               for field in ("screening_id", "fingerprint",
+                             "verdict", "matched_rules",
+                             "text_sha256", "reporter",
+                             "district_id", "product", "at",
+                             "rules_version")):
             problems.append(
                 f"screening {screening['screening_id']}: "
                 "does not re-perform from its report — the "
