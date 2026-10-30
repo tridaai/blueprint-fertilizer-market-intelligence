@@ -2277,6 +2277,108 @@ class MarketStore:
                           tuple(params))
         return [self._digest_row(row) for row in rows]
 
+    # -- field screenings, release acts & integrity boards (R17) ----
+
+    def insert_field_screening(self, screening: dict) -> None:
+        self._insert_many(
+            "field_screenings",
+            ["screening_id", "fingerprint", "report_id",
+             "verdict", "at", "rules_version", "payload"],
+            [(
+                screening["screening_id"],
+                screening["fingerprint"], screening["report_id"],
+                screening["verdict"], screening["at"],
+                screening["rules_version"],
+                json.dumps(screening),
+            )],
+        )
+
+    def _field_screening_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_field_screening(self, screening_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM field_screenings "
+            f"WHERE screening_id = {self._ph}",
+            (screening_id,),
+        )
+        return self._field_screening_row(rows[0]) if rows else None
+
+    def get_field_screening_by_report(
+            self, report_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM field_screenings "
+            f"WHERE report_id = {self._ph}",
+            (report_id,),
+        )
+        return self._field_screening_row(rows[0]) if rows else None
+
+    def list_field_screenings(self, verdict=None) -> list[dict]:
+        sql, params = "SELECT * FROM field_screenings WHERE 1=1", []
+        if verdict is not None:
+            sql += f" AND verdict = {self._ph}"
+            params.append(verdict)
+        rows = self._rows(sql + " ORDER BY report_id", tuple(params))
+        return [self._field_screening_row(row) for row in rows]
+
+    def insert_field_screening_act(self, act: dict) -> None:
+        self._insert_many(
+            "field_screening_acts",
+            ["act_id", "screening_id", "report_id", "act",
+             "actor", "reason", "as_of"],
+            [(
+                act["act_id"], act["screening_id"],
+                act["report_id"], act["act"], act["actor"],
+                act["reason"], act["as_of"],
+            )],
+        )
+
+    def get_field_screening_act(self, act_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM field_screening_acts "
+            f"WHERE act_id = {self._ph}",
+            (act_id,),
+        )
+        return rows[0] if rows else None
+
+    def list_field_screening_acts(self, screening_id: str) -> list[dict]:
+        return self._rows(
+            f"SELECT * FROM field_screening_acts "
+            f"WHERE screening_id = {self._ph} ORDER BY act_id",
+            (screening_id,),
+        )
+
+    def insert_integrity_board(self, board: dict) -> None:
+        self._insert_many(
+            "reporter_integrity_boards",
+            ["board_id", "fingerprint", "as_of",
+             "rules_version", "payload"],
+            [(
+                board["board_id"], board["fingerprint"],
+                board["as_of"], board["rules_version"],
+                json.dumps(board),
+            )],
+        )
+
+    def _integrity_board_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_integrity_board(self, board_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM reporter_integrity_boards "
+            f"WHERE board_id = {self._ph}",
+            (board_id,),
+        )
+        return self._integrity_board_row(rows[0]) if rows else None
+
+    def list_integrity_boards(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM reporter_integrity_boards "
+            "ORDER BY as_of, board_id")
+        return [self._integrity_board_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:

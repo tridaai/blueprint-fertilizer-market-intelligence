@@ -40,6 +40,14 @@ Three artefacts, all insert-only like the rest of the store:
   from the stored reports, acts and pack alone. The estimate
   itself is never mutated: the assessment carries the base
   total and the adjusted total side by side.
+
+R17 adds one more artefact at this same door: a
+**screening verdict** (see `integrity`), struck for
+every landing — intake and promotion alike — before
+the report's note may travel. While a note stands
+held, the views this module builds redact it; the
+report itself, its attribution and its weight are
+never touched by screening.
 """
 
 from __future__ import annotations
@@ -51,6 +59,7 @@ from datetime import date
 from pydantic import BaseModel
 
 from . import field_rules as pack
+from . import integrity as integrity_engine
 from .generator import PRODUCTS
 from .share import season_of_month
 from .supply import head_of
@@ -251,6 +260,13 @@ def land_submission(store, sub: dict, landed_on: str) -> dict:
     conflicts_with = same_id[0]["report_id"] if same_id else None
     report = build_report(sub, landed_on, conflicts_with)
     store.insert_field_report_artefact(report.model_dump())
+    # R17: every landing is screened before its note may
+    # travel anywhere — the verdict is struck here, at
+    # the one door every report enters by, promotion
+    # included. A duplicate re-send lands nothing and
+    # strikes nothing: its screening already stands.
+    screening = integrity_engine.build_screening(report.model_dump())
+    store.insert_field_screening(screening.model_dump())
     stored = store.get_field_report_artefact(report.report_id)
     return {
         "outcome": "conflict" if same_id else "landed",
@@ -310,6 +326,20 @@ def report_view(store, report: dict) -> dict:
     view["review_state"] = derive_review_state(acts)
     view["has_conflict"] = bool(conflict_ids)
     view["conflict_report_ids"] = conflict_ids
+    # R17: the view carries the screening summary, and
+    # while the note stands held it is absent from the
+    # view — the raw text is served only by the guarded
+    # screening surface, never by the report's own read.
+    summary = integrity_engine.screening_for(store, report)
+    view["screening"] = summary
+    if summary is not None and summary["state"] == "held":
+        view["detail"] = None
+        view["submission"] = {
+            **report["submission"], "detail": None}
+        view["detail_held"] = {
+            "screening_id": summary["screening_id"],
+            "matched_rules": summary["matched_rules"],
+        }
     return view
 
 
