@@ -925,6 +925,70 @@ and never presents a stale figure as current.
   alike enter it only while their folded state is
   draft, and leave it only through the act.
 
+## What Round 16 adds
+
+- **Alert subscriptions** (roadmap F21-AL1) —
+  a named reader of the R15 register holds a
+  standing instruction as an insert-only artefact:
+  notice classes (price alerts, supply-gap heads,
+  policy registry heads), product and region
+  filters, and a severity floor per class in that
+  class's own labels. A change is a new version
+  superseding the old by link, never an edit. The
+  strike itself is judged by the access pack —
+  only the subscriber or the strategy desk may
+  strike, the reach must sit inside the
+  subscriber's remit, viewers and unregistered
+  names hold no subscriptions — and the decision,
+  allowed or refused, is an access-log entry like
+  every other guarded act since Round 15.
+- **Deliveries, derived never authored** — at any
+  read date the deliveries are recomputed from the
+  notices as they stand, the subscription version
+  in force on the day each notice was struck, and
+  the subscriber's remit: the filter states what a
+  reader wants, the remit states what they may
+  receive, and a delivery needs both (a feedstock
+  notice sits in no product remit; a national
+  notice cannot be placed in a regional one). A
+  delivery is evidence an alert reached a
+  subscriber — it changes no alert's state — and a
+  notice nobody reaches is counted per class as
+  undelivered-by-design. Policy notices are their
+  own class throughout: never counted as price
+  alerts, in delivery sets, undelivered counts and
+  digests alike. Alert reads themselves now pass
+  the guard too, with Round 15's existence hiding.
+- **Escalation as a clock in code** — an
+  alert-band price alert still open three days
+  past its strike climbs to the product owner the
+  register names for its item (the strategy
+  principal for an item nobody owns); at seven
+  days the strategy desk joins the ladder. The
+  state is derived from the alert's acts folded at
+  the read date on every read — there is no
+  background job to trust — and an acknowledgement
+  stops the clock from its own date. An escalation
+  names follow-up tasks pinned to the alert by
+  reference; it never writes one, and it composes
+  with the Round 13 queue the same way: a gap
+  notice carries its queue item's id, by reference
+  only.
+- **Scheduled digests** (roadmap F21-AL2) — a
+  digest artefact freezes one subscription
+  version's delivery set, its per-class counts and
+  its escalations at a generation date, so what a
+  reader was told can be re-performed later
+  exactly; regenerating at a later date is a new
+  artefact superseding the old by link. The same
+  content renders as JSON through the API and CLI
+  and as plain low-bandwidth text lines. The whole
+  layer — subscriptions, deliveries, escalations,
+  digests — is re-performed by an independent
+  verifier, and a subscription written straight
+  into the store with no judging entry is named
+  as unreconciled.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1183,14 +1247,16 @@ src/fertilizer_intelligence/
   review.py          the publication review queue: membership, cell/figure diffs, verifier
   ingest_rules.py    the versioned ingest pack (source registry, class contracts, quarantine reasons)
   ingest.py          connector loads, batch verifier, corrections + chains, actuals report
+  notify_rules.py    the versioned notify pack (notice classes, severity floors, escalation windows)
+  notify.py          subscriptions, derived deliveries + escalations, digests and their verifier
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest/notify wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0015 in sqlite + postgres dialects
+migrations/          0001-0016 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md

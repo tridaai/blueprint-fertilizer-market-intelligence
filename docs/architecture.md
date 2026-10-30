@@ -397,7 +397,7 @@ those steps; every state transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0015)
+## Data model (migrations 0001–0016)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -615,6 +615,21 @@ summaries, diffs and reviewed fingerprints in the
 payload). All insert-only; a follow-up's state and a
 note's superseded flag exist nowhere as columns —
 they are folds, exactly like an alert's.
+
+Notify tables (0016): `subscriptions` (one row per
+subscription version: the subscriber, striker, strike
+date and notify pack version as columns; the class,
+product and region filters and the per-class severity
+floors in the payload) and `digests` (one row per
+generation: the subscription it freezes, its principal
+and generation date as columns; the delivery rows,
+per-class counts and escalation rows in the payload).
+Deliveries and escalation states take no table — they
+are derivations over the alert artefacts, the
+subscription versions and the alert acts, re-performed
+on every read and every verification, so there is no
+stored delivery for a tamper to invent and no stored
+escalation for a job to misreport.
 
 ## Deployment
 

@@ -1114,6 +1114,85 @@ def main() -> int:
     print(f"  the queue itself re-derives from the record: "
           f"{service.verify_review_queue(queue['queue_id'])['verified']}.")
 
+    print("\n--- Round 16: subscriptions, deliveries, escalation, digests ---")
+    rao_sub = service.subscribe(
+        "A. Rao", "A. Rao", "2025-11-01",
+        ["price", "gap", "policy"])
+    iyer_sub = service.subscribe(
+        "S. Iyer", "S. Iyer", "2025-11-01",
+        ["price", "gap"], products=["DAP", "NPK_10_26_26"])
+    print(f"  standing instructions struck before the season's "
+          f"alerts: A. Rao takes every class; S. Iyer takes "
+          f"price and gap notices for DAP and NPK only.")
+    try:
+        service.subscribe(
+            "R. Menon", "R. Menon", "2025-11-01",
+            ["price"], products=["DAP"])
+        print("  ERROR: an out-of-remit strike was accepted")
+    except Exception as exc:
+        entries16 = [e for e in service.access_log()
+                     if e["surface"] == "subscription"
+                     and e["decision"] == "refused"]
+        print(f"  R. Menon (UREA remit) striking a DAP "
+              f"subscription is refused at the door — "
+              f"{exc} — and the refusal is entry "
+              f"{entries16[-1]['entry_id']} in the access "
+              f"log he never sees.")
+    deliveries16 = service.deliveries("2026-04-24")
+    rao16 = [d for d in deliveries16
+             if d["principal"] == "A. Rao"]
+    iyer16 = [d for d in deliveries16
+              if d["principal"] == "S. Iyer"]
+    from collections import Counter as _Counter
+    print(f"  deliveries derived at 2026-04-24: A. Rao "
+          f"{len(rao16)} ({dict(_Counter(d['notice_class'] for d in rao16))}), "
+          f"S. Iyer {len(iyer16)} — every one inside the "
+          f"subscriber's filter and remit; policy notices "
+          f"are counted as policy, never as price alerts. "
+          f"Undelivered by design: "
+          f"{service.undelivered_counts('2026-04-24')}.")
+    escalations16 = [e for e in service.escalations("2026-04-21")
+                     if e["level"] >= 1]
+    if escalations16:
+        esc = escalations16[0]
+        task16 = service.create_followup(
+            "price_alert", esc["alert_id"], "S. Iyer",
+            "A. Rao", "2026-04-21",
+            "Chase the unacknowledged critical alert.",
+            due="2026-04-24")
+        esc_after = next(
+            e for e in service.escalations("2026-04-21")
+            if e["alert_id"] == esc["alert_id"])
+        esc_now = next(
+            e for e in service.escalations("2026-04-24")
+            if e["alert_id"] == esc["alert_id"])
+        names = ", ".join(t["principal"] or "unstaffed"
+                          for t in esc["targets"])
+        print(f"  read at 2026-04-21, the {esc['item']} alert "
+              f"{esc['alert_id']} had sat open "
+              f"{esc['age_days']} days and stood at "
+              f"escalation level {esc['level']} — with "
+              f"{names}; a follow-up pinned to it "
+              f"({task16['task_id']}) is named by the "
+              f"escalation by reference, never written by "
+              f"it: "
+              f"{esc_after['followup_task_ids'] == [task16['task_id']]}. "
+              f"The readiness walk's acknowledgements of "
+              f"2026-04-22 then stopped its clock: at "
+              f"2026-04-24 it reads level {esc_now['level']}, "
+              f"state {esc_now['state']}.")
+    digest16 = service.strike_digest(
+        rao_sub["subscription_id"], "2026-04-24")
+    digest16b = service.strike_digest(
+        rao_sub["subscription_id"], "2026-04-25")
+    print(f"  A. Rao's digest ({digest16['digest_id']}) "
+          f"freezes {len(digest16['deliveries'])} deliveries "
+          f"— counts {digest16['counts']} — and the next "
+          f"day's regeneration supersedes it by link: "
+          f"{digest16b['supersedes'] == digest16['digest_id']}; "
+          f"the whole notify layer re-performs: "
+          f"{service.verify_subscriptions('2026-04-24')['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
