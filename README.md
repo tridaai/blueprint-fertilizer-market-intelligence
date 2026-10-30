@@ -989,6 +989,60 @@ and never presents a stale figure as current.
   into the store with no judging entry is named
   as unreconciled.
 
+## What Round 17 adds
+
+- **Field-text screening** (roadmap F21-AS2) —
+  field notes are the one place unvetted prose
+  enters this system, so every landed report is
+  screened at the door against a versioned
+  integrity pack: rules addressed to text that
+  speaks to a model or a system (instruction
+  overrides, role markers, directive headers,
+  persona assignments, output control), run over
+  the note as written and over any base64 span it
+  carries, decoded — an encoded instruction is
+  the same instruction. The verdict is its own
+  insert-only artefact bound to the report and to
+  a hash of the exact text screened. A held note
+  is treated as absent everywhere it could
+  travel: redacted on the report's views, and a
+  named omission in the structuring context a
+  model would be handed — while attribution,
+  figures and weighting proceed untouched, and
+  clean market prose passes byte-identically.
+  Screening never edits the report it judges.
+- **Release as a second pair of eyes** — held
+  text is freed only by a named reviewer's act
+  with a reason from the pack's vocabulary; the
+  reporter can never release their own text, a
+  release against unheld text is refused, and
+  the state (clean / held / released) is the
+  fold, stored nowhere. The one read that serves
+  a note raw is the access-guarded screening
+  surface: judged on the report's district and
+  product under the R15 pack, existence-hidden
+  outside the reader's remit, closed to viewers,
+  and logged like every guarded read since R15.
+- **Reporter integrity, computed and advisory** —
+  an integrity board artefact strikes, per
+  reporter, the facts a reviewer needs: landing
+  volume against the pack's stated spike bar,
+  duplicate-content clusters detected exactly
+  (the same observation under different
+  submission ids — a re-sent submission is the
+  sync layer's duplicate, never a cluster),
+  conflict involvement, and review outcomes
+  folded from the acts. A signal is a prompt for
+  a human to look, never an automatic
+  consequence: the board writes nothing back,
+  and a field assessment re-performs identically
+  whether or not a board exists — that
+  independence is graded, not asserted. The
+  whole layer re-performs through an independent
+  verifier, and `make integritycheck` plants
+  direct, role-marked and encoded injections and
+  grades the discipline end to end.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1027,6 +1081,7 @@ make harness        # exercise the HTTP read surface in-process
 make test           # pytest
 make evals          # the eval gate
 make mapcheck       # re-perform every figure the map/board/queue show
+make integritycheck # plant injections; grade screening + integrity end to end
 make serve          # the API on http://localhost:8000
 ```
 
@@ -1249,14 +1304,16 @@ src/fertilizer_intelligence/
   ingest.py          connector loads, batch verifier, corrections + chains, actuals report
   notify_rules.py    the versioned notify pack (notice classes, severity floors, escalation windows)
   notify.py          subscriptions, derived deliveries + escalations, digests and their verifier
+  integrity_rules.py the versioned integrity pack (screening rules, release vocabulary, spike bar)
+  integrity.py       field-text screening, release fold, reporter-integrity boards and their verifier
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest/notify wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest/notify/integrity wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0016 in sqlite + postgres dialects
+migrations/          0001-0017 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md

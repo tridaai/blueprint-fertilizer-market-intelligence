@@ -631,6 +631,24 @@ on every read and every verification, so there is no
 stored delivery for a tamper to invent and no stored
 escalation for a job to misreport.
 
+Integrity tables (0017): `field_screenings` (one row
+per landed field report: the verdict, landing date
+and integrity pack version as columns; the matched
+rules and the screened text's hash in the payload —
+the text itself stays on the report artefact it
+judges, and the hash is what binds verdict to text),
+`field_screening_acts` (the release acts: actor,
+reason and date as columns, content-addressed like
+the other act tables) and `reporter_integrity_boards`
+(one row per strike: its date and pack version as
+columns; the per-reporter rows — window counts,
+duplicate clusters, conflicts, review outcomes — in
+the payload). Screening state is a fold of verdict
+and acts; a board is a snapshot other artefacts
+never read, so its contents are re-performed on
+verification and nothing downstream can inherit a
+signal as a fact.
+
 ## Deployment
 
 Multi-stage Dockerfile, non-root runtime user, port 8000. Compose
