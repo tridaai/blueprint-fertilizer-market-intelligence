@@ -393,6 +393,38 @@ Round 15 adds the roles, approvals & collaboration counters
                                    does not verify, or a publication
                                    from the queue that does not
                                    bind the reviewed fingerprint
+
+Round 16 adds the subscription, delivery & escalation
+counters (all zero-tolerance):
+  - subscription_scope_errors .... a subscription strike
+                                   accepted outside the
+                                   subscriber's remit, a strike
+                                   by a third party accepted, or
+                                   a scoped alert read that
+                                   returns an out-of-scope alert
+                                   instead of absence
+  - delivery_derivation_errors ... a delivery set that
+                                   disagrees with the re-derivation
+                                   folded here from the notices,
+                                   versions and register, a
+                                   delivery outside the
+                                   subscriber's remit, a policy
+                                   notice counted as a price
+                                   alert, or delivered +
+                                   undelivered not accounting
+                                   for every notice per class
+  - escalation_errors ............ an escalation level,
+                                   state or ladder target that
+                                   disagrees with the fold of
+                                   the alert's acts at the read
+                                   date and the pack's windows
+  - digest_errors ................ a digest whose contents
+                                   differ from the subscription's
+                                   derived set at its generation
+                                   date, a regeneration that
+                                   edits instead of superseding,
+                                   or a forged subscription the
+                                   verifier does not name
 """
 
 from __future__ import annotations
@@ -2977,7 +3009,184 @@ def main() -> int:
             counters["access_log_errors"] += 1
     _conn.close()
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15 evals — fertilizer market intelligence")
+    # -- Round 16: subscriptions judged by the access
+    # pack, deliveries derived (and re-derived here by
+    # the opposite walk), escalation folded from the
+    # acts at the read date, digests frozen. The R15
+    # section's access-entry tamper stands in the log;
+    # none of it touches the subscription surface.
+    from fertilizer_intelligence.notify import (
+        SubscriptionRefused as _SubRefused16)
+
+    counters.setdefault("subscription_scope_errors", 0)
+    counters.setdefault("delivery_derivation_errors", 0)
+    counters.setdefault("escalation_errors", 0)
+    counters.setdefault("digest_errors", 0)
+
+    asof16 = "2026-04-24"
+    rao16 = service.subscribe(
+        "A. Rao", "A. Rao", "2025-01-01",
+        ["price", "gap", "policy"])
+    menon16 = service.subscribe(
+        "R. Menon", "R. Menon", "2025-01-01", ["price"],
+        products=["UREA"])
+    service.subscribe(
+        "K. Bhatt", "A. Rao", "2025-01-01",
+        ["price", "gap", "policy"])
+    try:
+        service.subscribe(
+            "R. Menon", "R. Menon", "2025-01-02", ["price"],
+            products=["DAP"])
+        counters["subscription_scope_errors"] += 1  # accepted!
+    except _SubRefused16:
+        pass
+    if not any(e["surface"] == "subscription"
+               and e["decision"] == "refused"
+               for e in service.access_log()):
+        counters["subscription_scope_errors"] += 1
+    try:
+        service.subscribe(
+            "S. Iyer", "R. Menon", "2025-01-02", ["price"])
+        counters["subscription_scope_errors"] += 1  # accepted!
+    except _SubRefused16:
+        pass
+
+    notices16 = service.notices()
+    by_class16 = {c: [n for n in notices16
+                      if n["notice_class"] == c]
+                  for c in ("price", "gap", "policy")}
+    rao_deliveries16 = service.deliveries(asof16, "A. Rao")
+    # A subscription delivers the notices struck while
+    # it is in force: the two 2024 policy registrations
+    # predate every subscription and are Rao's by no
+    # route — they stand in the undelivered count.
+    if {(d["subscription_id"], d["notice_id"])
+            for d in rao_deliveries16} != {
+            (rao16["subscription_id"], n["notice_id"])
+            for n in notices16
+            if rao16["at"] <= n["struck_on"] <= asof16}:
+        counters["delivery_derivation_errors"] += 1
+    expected_menon16 = {
+        a["alert_id"] for a in store.list_alerts()
+        if a["item"] == "UREA" and a["as_of"] <= asof16}
+    if {d["notice_id"] for d in
+            service.deliveries(asof16, "R. Menon")} != \
+            expected_menon16:
+        counters["delivery_derivation_errors"] += 1
+    bhatt16 = service.deliveries(asof16, "K. Bhatt")
+    if any("MOP" not in d["products"] for d in bhatt16):
+        counters["delivery_derivation_errors"] += 1
+    if any(d["notice_class"] == "policy"
+           for d in service.deliveries(asof16, "R. Menon")):
+        counters["delivery_derivation_errors"] += 1
+    delivered_ids16 = {d["notice_id"]
+                       for d in service.deliveries(asof16)}
+    undelivered16 = service.undelivered_counts(asof16)
+    for _class16, _rows16 in by_class16.items():
+        _struck16 = {n["notice_id"] for n in _rows16
+                     if n["struck_on"] <= asof16}
+        if len(_struck16 & delivered_ids16) + \
+                undelivered16[_class16] != len(_struck16):
+            counters["delivery_derivation_errors"] += 1
+    if not service.verify_subscriptions(asof16)["verified"]:
+        counters["delivery_derivation_errors"] += 1
+
+    urea_alert16 = next(a for a in store.list_alerts()
+                        if a["item"] == "UREA")
+    dap_alert16 = next(a for a in store.list_alerts()
+                       if a["item"] == "DAP")
+    if service.scoped_alert(
+            "R. Menon", urea_alert16["alert_id"], asof16) is None:
+        counters["subscription_scope_errors"] += 1
+    if service.scoped_alert(
+            "R. Menon", dap_alert16["alert_id"],
+            asof16) is not None:
+        counters["subscription_scope_errors"] += 1
+
+    from datetime import date as _date16
+    esc16 = {e["alert_id"]: e
+             for e in service.escalations(asof16)}
+    for _alert16 in store.list_alerts():
+        if _alert16["band"] != "alert":
+            continue
+        _state16 = "open"
+        for _act16 in store.list_alert_acts(_alert16["alert_id"]):
+            if _act16["as_of"] > asof16:
+                continue
+            if _act16["act"] == "acknowledge":
+                _state16 = "acknowledged"
+            elif _act16["act"] == "close":
+                _state16 = "closed"
+        _age16 = (_date16.fromisoformat(asof16)
+                  - _date16.fromisoformat(
+                      _alert16["as_of"])).days
+        _level16 = 0
+        if _state16 == "open":
+            if _age16 >= 7:
+                _level16 = 2
+            elif _age16 >= 3:
+                _level16 = 1
+        _mine16 = esc16.get(_alert16["alert_id"])
+        if _mine16 is None or _mine16["level"] != _level16 \
+                or _mine16["state"] != _state16:
+            counters["escalation_errors"] += 1
+            continue
+        if _level16 >= 1:
+            _want16 = "S. Iyer" if _alert16["item"] == "DAP" \
+                else None
+            _names16 = [t["principal"]
+                        for t in _mine16["targets"]]
+            if _want16 is not None \
+                    and _names16[0] != _want16:
+                counters["escalation_errors"] += 1
+            if _level16 == 2 and "A. Rao" not in _names16:
+                counters["escalation_errors"] += 1
+
+    digest16 = service.strike_digest(
+        rao16["subscription_id"], asof16)
+    if digest16["deliveries"] != rao_deliveries16:
+        counters["digest_errors"] += 1
+    if digest16["counts"]["policy"] != len(
+            [d for d in rao_deliveries16
+             if d["notice_class"] == "policy"]):
+        counters["digest_errors"] += 1
+    if digest16["counts"]["price"] != len(
+            [d for d in rao_deliveries16
+             if d["notice_class"] == "price"]):
+        counters["digest_errors"] += 1
+    digest16b = service.strike_digest(
+        rao16["subscription_id"], "2026-04-25")
+    if digest16b["supersedes"] != digest16["digest_id"]:
+        counters["digest_errors"] += 1
+
+    # Forge, last: a subscription row written straight
+    # into the store, with no access entry judging it —
+    # the verifier must name it as unreconciled.
+    _raw16 = _sqlite3.connect(settings.sqlite_path)
+    _forged16 = {
+        "subscription_id": "SUB-forged0000",
+        "fingerprint": "0" * 64, "principal": "A. Rao",
+        "struck_by": "A. Rao", "at": "2025-01-01",
+        "classes": ["price"], "products": [], "regions": [],
+        "floors": {"price": "watch"},
+        "rules_version": "2026.10.1", "supersedes": None}
+    _raw16.execute(
+        "INSERT INTO subscriptions (subscription_id, "
+        "fingerprint, principal, struck_by, at, "
+        "rules_version, payload) VALUES (?, ?, ?, ?, ?, "
+        "?, ?)",
+        (_forged16["subscription_id"],
+         _forged16["fingerprint"], "A. Rao", "A. Rao",
+         "2025-01-01", "2026.10.1",
+         json.dumps(_forged16)))
+    _raw16.commit()
+    _raw16.close()
+    _problems16 = service.verify_subscriptions(
+        asof16)["problems"]
+    if not any("SUB-forged0000" in p for p in _problems16):
+        counters["digest_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
