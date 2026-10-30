@@ -60,9 +60,17 @@ SURFACE_EXPORT = "export_pack"
 # entry still re-decides from this pack.
 SURFACE_ALERT_READ = "alert_read"
 SURFACE_SUBSCRIPTION = "subscription"
+# R17 adds two more, the same way: the screening
+# surface guards the one read that serves held field
+# text raw, judged on the report's district and
+# product like a competitor read; the integrity board
+# is a staff review surface, closed to viewers.
+SURFACE_FIELD_SCREENING = "field_screening"
+SURFACE_REPORTER_INTEGRITY = "reporter_integrity"
 SURFACES = (SURFACE_DISTRICT_LIST, SURFACE_COMPETITOR,
             SURFACE_EXPORT, SURFACE_ALERT_READ,
-            SURFACE_SUBSCRIPTION)
+            SURFACE_SUBSCRIPTION, SURFACE_FIELD_SCREENING,
+            SURFACE_REPORTER_INTEGRITY)
 
 # -- decisions ----------------------------------------------
 DECISION_ALLOWED = "allowed"

@@ -175,6 +175,42 @@ def decide(store, principal: dict, surface: str,
                     "reason": "the alert carries no "
                               "geography inside the "
                               "reader's regions"}
+    if surface == pack.SURFACE_FIELD_SCREENING:
+        if role == pack.ROLE_VIEWER:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "field screening records are "
+                              "closed to viewers"}
+        if role == pack.ROLE_STRATEGY:
+            return {"decision": pack.DECISION_ALLOWED,
+                    "reason": "strategy reads the whole book"}
+        if role == pack.ROLE_PRODUCT:
+            if product is not None \
+                    and product in principal["products"]:
+                return {"decision": pack.DECISION_ALLOWED,
+                        "reason": "the report's product is "
+                                  "in the reader's remit"}
+            return {"decision": pack.DECISION_HIDDEN,
+                    "reason": "the report's product is "
+                              "outside the reader's remit"}
+        if role == pack.ROLE_REGIONAL:
+            judged_region = region if region is not None \
+                else region_of(store, district_id)
+            if judged_region is not None \
+                    and judged_region in principal["regions"]:
+                return {"decision": pack.DECISION_ALLOWED,
+                        "reason": "the report's district is "
+                                  "in the reader's region"}
+            return {"decision": pack.DECISION_HIDDEN,
+                    "reason": "the report's district is "
+                              "outside the reader's regions"}
+    if surface == pack.SURFACE_REPORTER_INTEGRITY:
+        if role == pack.ROLE_VIEWER:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "the reporter-integrity board "
+                              "is closed to viewers"}
+        return {"decision": pack.DECISION_ALLOWED,
+                "reason": "the integrity board is a review "
+                          "surface for named staff"}
     if surface == pack.SURFACE_COMPETITOR:
         if role == pack.ROLE_VIEWER:
             return {"decision": pack.DECISION_REFUSED,

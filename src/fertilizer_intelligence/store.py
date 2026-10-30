@@ -2325,12 +2325,12 @@ class MarketStore:
     def insert_field_screening_act(self, act: dict) -> None:
         self._insert_many(
             "field_screening_acts",
-            ["act_id", "screening_id", "report_id", "act",
-             "actor", "reason", "as_of"],
+            ["act_id", "fingerprint", "screening_id", "report_id",
+             "act", "actor", "reason", "as_of"],
             [(
-                act["act_id"], act["screening_id"],
-                act["report_id"], act["act"], act["actor"],
-                act["reason"], act["as_of"],
+                act["act_id"], act["fingerprint"],
+                act["screening_id"], act["report_id"], act["act"],
+                act["actor"], act["reason"], act["as_of"],
             )],
         )
 

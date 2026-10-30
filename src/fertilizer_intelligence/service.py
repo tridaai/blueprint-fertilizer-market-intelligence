@@ -23,6 +23,8 @@ from . import field as field_engine
 from . import field_rules as field_pack
 from . import ingest as ingest_engine
 from . import ingest_rules as ingest_pack
+from . import integrity as integrity_engine
+from . import integrity_rules as integrity_pack
 from . import market_map as map_engine
 from . import movements as movement_engine
 from . import notes as notes_engine
@@ -2563,6 +2565,178 @@ class MarketService:
             "digests": len(self.store.list_digests()),
             "deliveries": len(
                 notify_engine.derive_deliveries(self.store, as_of)),
+            "verified": not problems, "problems": problems}
+
+    # -- field screening & reporter integrity (R17) ---
+
+    def field_screening(self, report_id) -> dict | None:
+        """One report's screening record with its folded
+        state — the verdict struck at landing and whether
+        the text still stands held. The record names the
+        matched rules; it never carries the text."""
+        report = self.store.get_field_report_artefact(report_id)
+        if report is None:
+            return None
+        screening = self.store.get_field_screening_by_report(
+            report_id)
+        if screening is None:
+            return None
+        return {**screening,
+                "state": integrity_engine.screening_state(
+                    self.store, screening)}
+
+    def scoped_screening(self, principal_name, report_id,
+                         at) -> dict | None:
+        """The one read that serves a report's note raw,
+        through the guard: the access pack judges it on
+        the report's district and product, every outcome
+        appends its entry, and an out-of-scope read
+        returns None — exactly what a missing report
+        returns. In scope, the view carries the
+        screening, its folded state, the release acts
+        and the note as written."""
+        report = self.store.get_field_report_artefact(report_id)
+        screening = self.store.get_field_screening_by_report(
+            report_id) if report else None
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_FIELD_SCREENING,
+            f"field_report:{report_id}",
+            report["district_id"] if report else None,
+            report["product"] if report else None, at)
+        if report is None or screening is None \
+                or entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        return {
+            **screening,
+            "state": integrity_engine.screening_state(
+                self.store, screening),
+            "detail": report["detail"],
+            "reporter": report["reporter"],
+            "acts": self.store.list_field_screening_acts(
+                screening["screening_id"]),
+        }
+
+    def release_screening(self, report_id, actor, reason,
+                          as_of) -> dict:
+        """Release one held note as a named reviewer's
+        act. The refusals are the discipline: the
+        screening must stand held, the reason must be
+        in the pack's vocabulary, and the releaser must
+        not be the reporter — held text is freed by a
+        second pair of eyes or not at all."""
+        report = self.store.get_field_report_artefact(report_id)
+        if report is None:
+            raise ValueError(f"no such field report: {report_id}")
+        if not actor or not actor.strip():
+            raise ValueError("a release act names its actor")
+        if reason not in integrity_pack.ACT_REASONS[
+                integrity_pack.ACT_RELEASE]:
+            raise ValueError(
+                f"release reason must be one of "
+                f"{sorted(integrity_pack.ACT_REASONS[integrity_pack.ACT_RELEASE])}")
+        screening = self.store.get_field_screening_by_report(
+            report_id)
+        if screening is None:
+            raise integrity_engine.ScreeningError(
+                f"field report {report_id} has no screening record")
+        state = integrity_engine.screening_state(
+            self.store, screening)
+        if state == integrity_pack.STATE_CLEAN:
+            raise integrity_engine.ScreeningError(
+                f"field report {report_id}: its note was never "
+                "held — there is nothing to release")
+        if state == integrity_pack.STATE_RELEASED:
+            raise integrity_engine.ScreeningError(
+                f"field report {report_id}: its note already "
+                "stands released")
+        if integrity_engine._normalise_name(actor) == \
+                integrity_engine._normalise_name(report["reporter"]):
+            raise integrity_engine.ScreeningError(
+                "the reporter may not release their own held "
+                "text — release is a second pair of eyes")
+        act = integrity_engine.build_release_act(
+            screening, actor.strip(), reason, as_of)
+        existing = self.store.get_field_screening_act(act.act_id)
+        if existing is not None:
+            return existing
+        self.store.insert_field_screening_act({
+            "act_id": act.act_id, "fingerprint": act.fingerprint,
+            "screening_id": act.screening_id,
+            "report_id": act.report_id, "act": act.act,
+            "actor": act.actor, "reason": act.reason,
+            "as_of": act.as_of})
+        log.info("screening release act recorded: %s", act.act_id)
+        return self.store.get_field_screening_act(act.act_id)
+
+    def field_context(self, report_id) -> dict | None:
+        """The structuring context a model would be
+        handed for one report — built only from the
+        screened surface, so held text is a named
+        omission in it, never content."""
+        report = self.store.get_field_report_artefact(report_id)
+        if report is None:
+            return None
+        return integrity_engine.structuring_context(
+            self.store, report)
+
+    def strike_integrity_board(self, as_of) -> dict:
+        """Strike the reporter-integrity board at a
+        date: per reporter, volume against the spike
+        bar, duplicate clusters, conflicts and review
+        outcomes — computed from the record, advisory
+        only. Re-striking at a later date supersedes
+        the head by link; the same strike repeated is
+        the same artefact."""
+        candidate = integrity_engine.build_integrity_board(
+            self.store, as_of)
+        existing = self.store.get_integrity_board(
+            candidate.board_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_integrity_boards(), "board_id")
+        if head is not None and head["as_of"] == as_of \
+                and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["board_id"] if head else None})
+        self.store.insert_integrity_board(candidate.model_dump())
+        log.info("integrity board stored: %s", candidate.board_id)
+        return self.store.get_integrity_board(candidate.board_id)
+
+    def get_integrity_board(self, board_id) -> dict | None:
+        return self.store.get_integrity_board(board_id)
+
+    def list_integrity_boards(self) -> list[dict]:
+        return self.store.list_integrity_boards()
+
+    def scoped_integrity_board(self, principal_name, board_id,
+                               at) -> dict | None:
+        """One integrity board through the guard: a
+        staff review surface, closed to viewers, with
+        every decision in the access log; a refused or
+        missing board reads as absent."""
+        board = self.store.get_integrity_board(board_id)
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_REPORTER_INTEGRITY,
+            board_id, None, None, at)
+        if board is None \
+                or entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        return board
+
+    def verify_integrity(self, as_of) -> dict:
+        problems = integrity_engine.verify_integrity(
+            self.store, as_of)
+        return {
+            "screenings": len(self.store.list_field_screenings()),
+            "screening_acts": sum(
+                len(self.store.list_field_screening_acts(
+                    s["screening_id"]))
+                for s in self.store.list_field_screenings()),
+            "boards": len(self.store.list_integrity_boards()),
             "verified": not problems, "problems": problems}
 
     def ready(self) -> bool:

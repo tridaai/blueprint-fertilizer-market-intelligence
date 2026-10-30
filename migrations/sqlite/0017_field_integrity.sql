@@ -18,6 +18,7 @@ CREATE TABLE field_screenings (
 
 CREATE TABLE field_screening_acts (
     act_id       TEXT PRIMARY KEY,
+    fingerprint  TEXT NOT NULL,
     screening_id TEXT NOT NULL,
     report_id    TEXT NOT NULL,
     act          TEXT NOT NULL,
