@@ -54,8 +54,15 @@ ROLES = (ROLE_STRATEGY, ROLE_PRODUCT, ROLE_REGIONAL,
 SURFACE_DISTRICT_LIST = "district_list"
 SURFACE_COMPETITOR = "competitor_read"
 SURFACE_EXPORT = "export_pack"
+# R16 adds two surfaces to the same log under the same
+# version: no R15 decision changes — the new surfaces
+# judge acts that did not exist before — and every
+# entry still re-decides from this pack.
+SURFACE_ALERT_READ = "alert_read"
+SURFACE_SUBSCRIPTION = "subscription"
 SURFACES = (SURFACE_DISTRICT_LIST, SURFACE_COMPETITOR,
-            SURFACE_EXPORT)
+            SURFACE_EXPORT, SURFACE_ALERT_READ,
+            SURFACE_SUBSCRIPTION)
 
 # -- decisions ----------------------------------------------
 DECISION_ALLOWED = "allowed"

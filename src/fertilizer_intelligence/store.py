@@ -2200,6 +2200,83 @@ class MarketStore:
             "SELECT * FROM review_refusals ORDER BY as_of, refusal_id")
         return [self._review_refusal_row(row) for row in rows]
 
+    # -- the notify layer (R16): subscription artefacts
+    # and digest artefacts. Insert-only like every
+    # artefact table — a subscription is superseded by
+    # a new row, a digest by a later one, never edited.
+
+    def insert_subscription(self, subscription: dict) -> None:
+        self._insert_many(
+            "subscriptions",
+            ["subscription_id", "fingerprint", "principal",
+             "struck_by", "at", "rules_version", "payload"],
+            [(
+                subscription["subscription_id"],
+                subscription["fingerprint"],
+                subscription["principal"],
+                subscription["struck_by"], subscription["at"],
+                subscription["rules_version"],
+                json.dumps(subscription),
+            )],
+        )
+
+    def _subscription_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_subscription(self, subscription_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM subscriptions "
+            f"WHERE subscription_id = {self._ph}",
+            (subscription_id,),
+        )
+        return self._subscription_row(rows[0]) if rows else None
+
+    def list_subscriptions(self, principal=None) -> list[dict]:
+        sql, params = "SELECT * FROM subscriptions WHERE 1=1", []
+        if principal is not None:
+            sql += f" AND principal = {self._ph}"
+            params.append(principal)
+        rows = self._rows(sql + " ORDER BY at, subscription_id",
+                          tuple(params))
+        return [self._subscription_row(row) for row in rows]
+
+    def insert_digest(self, digest: dict) -> None:
+        self._insert_many(
+            "digests",
+            ["digest_id", "fingerprint", "subscription_id",
+             "principal", "as_of", "rules_version", "payload"],
+            [(
+                digest["digest_id"], digest["fingerprint"],
+                digest["subscription_id"], digest["principal"],
+                digest["as_of"], digest["rules_version"],
+                json.dumps(digest),
+            )],
+        )
+
+    def _digest_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_digest(self, digest_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM digests WHERE digest_id = {self._ph}",
+            (digest_id,),
+        )
+        return self._digest_row(rows[0]) if rows else None
+
+    def list_digests(self, subscription_id=None,
+                     principal=None) -> list[dict]:
+        sql, params = "SELECT * FROM digests WHERE 1=1", []
+        for column, value in (("subscription_id", subscription_id),
+                              ("principal", principal)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY as_of, digest_id",
+                          tuple(params))
+        return [self._digest_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:

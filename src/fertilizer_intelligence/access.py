@@ -91,12 +91,18 @@ def region_of(store, district_id: str | None) -> str | None:
 def decide(store, principal: dict, surface: str,
            district_id: str | None = None,
            product: str | None = None,
-           region: str | None = None) -> dict:
+           region: str | None = None,
+           subscriber: str | None = None,
+           reach_products: tuple = (),
+           reach_regions: tuple = ()) -> dict:
     """One scope decision, judged from the pack. Returns
     the decision and the stated reason for it. A read's
     geography arrives as a district (resolved to its
     region from the register) or as a region directly —
-    competitor observations are struck per region."""
+    competitor observations are struck per region. The
+    subscription surface (R16) is judged on the
+    subscriber it names and the reach it asks for,
+    carried in the extra arguments."""
     role = principal["role"]
     if surface == pack.SURFACE_EXPORT:
         return {"decision": pack.DECISION_ALLOWED,
@@ -106,6 +112,69 @@ def decide(store, principal: dict, surface: str,
         return {"decision": pack.DECISION_ALLOWED,
                 "reason": "the district list is filtered "
                           "to the reader's regions"}
+    if surface == pack.SURFACE_SUBSCRIPTION:
+        sub = resolve_principal(subscriber) \
+            if subscriber else None
+        if sub is None or not sub["registered"] \
+                or sub["role"] == pack.ROLE_VIEWER:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "subscriptions are not open "
+                              "to viewers or unregistered "
+                              "names"}
+        if principal["name"] != subscriber \
+                and role != pack.ROLE_STRATEGY:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "a subscription is struck "
+                              "by its subscriber or by the "
+                              "strategy desk"}
+        if sub["role"] == pack.ROLE_PRODUCT \
+                and reach_products \
+                and not set(reach_products) \
+                <= set(sub["products"]):
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "the subscription reaches "
+                              "products outside the "
+                              "subscriber's remit"}
+        if sub["role"] == pack.ROLE_REGIONAL \
+                and reach_regions \
+                and not set(reach_regions) \
+                <= set(sub["regions"]):
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "the subscription reaches "
+                              "regions outside the "
+                              "subscriber's remit"}
+        return {"decision": pack.DECISION_ALLOWED,
+                "reason": "the subscription sits inside "
+                          "the subscriber's remit"}
+    if surface == pack.SURFACE_ALERT_READ:
+        if role == pack.ROLE_VIEWER:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "alert surfaces are closed "
+                              "to viewers"}
+        if role == pack.ROLE_STRATEGY:
+            return {"decision": pack.DECISION_ALLOWED,
+                    "reason": "strategy reads the whole book"}
+        if role == pack.ROLE_PRODUCT:
+            if product is not None \
+                    and product in principal["products"]:
+                return {"decision": pack.DECISION_ALLOWED,
+                        "reason": "the alert's item is in "
+                                  "the reader's remit"}
+            return {"decision": pack.DECISION_HIDDEN,
+                    "reason": "the alert's item is outside "
+                              "the reader's remit"}
+        if role == pack.ROLE_REGIONAL:
+            judged_region = region if region is not None \
+                else region_of(store, district_id)
+            if judged_region is not None \
+                    and judged_region in principal["regions"]:
+                return {"decision": pack.DECISION_ALLOWED,
+                        "reason": "the alert's geography is "
+                                  "in the reader's region"}
+            return {"decision": pack.DECISION_HIDDEN,
+                    "reason": "the alert carries no "
+                              "geography inside the "
+                              "reader's regions"}
     if surface == pack.SURFACE_COMPETITOR:
         if role == pack.ROLE_VIEWER:
             return {"decision": pack.DECISION_REFUSED,
@@ -179,15 +248,27 @@ def build_entry(principal: dict, surface: str, target: str,
 def record_entry(store, principal_name: str, surface: str,
                  target: str, district_id: str | None,
                  product: str | None, at: str,
-                 region: str | None = None) -> dict:
+                 region: str | None = None,
+                 subscriber: str | None = None,
+                 reach_products: tuple = (),
+                 reach_regions: tuple = ()) -> dict:
     """Judge one guarded action and append its entry.
     Returns the entry and the decision, so the caller
     renders allowed content or the absence shape. An
     identical decision at the same moment is the same
-    entry — recording is idempotent, never duplicated."""
+    entry — recording is idempotent, never duplicated.
+    A subscription entry (R16) carries its re-decision
+    material in the entry's own fields: the subscriber
+    in district_id, the reach in product and region as
+    comma-joined lists."""
     principal = resolve_principal(principal_name)
+    if surface == pack.SURFACE_SUBSCRIPTION:
+        district_id = subscriber
+        product = ",".join(reach_products) or None
+        region = ",".join(reach_regions) or None
     judged = decide(store, principal, surface, district_id,
-                    product, region)
+                    product, region, subscriber,
+                    reach_products, reach_regions)
     entry = build_entry(principal, surface, target,
                         district_id, product,
                         judged["decision"], judged["reason"], at,
@@ -237,9 +318,20 @@ def verify_access_log(store) -> list[str]:
                 f"under pack {entry['rules_version']}, which "
                 "this verifier does not re-perform")
             continue
-        judged = decide(store, resolve_principal(entry["principal"]),
-                        entry["surface"], entry["district_id"],
-                        entry["product"], entry.get("region"))
+        if entry["surface"] == pack.SURFACE_SUBSCRIPTION:
+            judged = decide(
+                store, resolve_principal(entry["principal"]),
+                entry["surface"], entry["district_id"],
+                entry["product"], entry.get("region"),
+                subscriber=entry["district_id"],
+                reach_products=tuple(entry["product"].split(","))
+                if entry["product"] else (),
+                reach_regions=tuple(entry["region"].split(","))
+                if entry.get("region") else ())
+        else:
+            judged = decide(store, resolve_principal(entry["principal"]),
+                            entry["surface"], entry["district_id"],
+                            entry["product"], entry.get("region"))
         if judged["decision"] != entry["decision"]:
             problems.append(
                 f"access entry {entry['entry_id']}: recorded "
