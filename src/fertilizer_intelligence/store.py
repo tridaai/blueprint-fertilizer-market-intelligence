@@ -2379,6 +2379,75 @@ class MarketStore:
             "ORDER BY as_of, board_id")
         return [self._integrity_board_row(row) for row in rows]
 
+    # -- model runs & monitoring boards (R18) ----
+
+    def insert_model_run(self, run: dict) -> None:
+        self._insert_many(
+            "model_runs",
+            ["run_id", "fingerprint", "seq", "purpose",
+             "profile", "model", "at", "rules_version",
+             "payload"],
+            [(
+                run["run_id"], run["fingerprint"], run["seq"],
+                run["purpose"], run["profile"], run["model"],
+                run["at"], run["rules_version"],
+                json.dumps(run),
+            )],
+        )
+
+    def _model_run_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_model_run(self, run_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM model_runs "
+            f"WHERE run_id = {self._ph}",
+            (run_id,),
+        )
+        return self._model_run_row(rows[0]) if rows else None
+
+    def list_model_runs(self, purpose=None,
+                        profile=None) -> list[dict]:
+        sql, params = "SELECT * FROM model_runs WHERE 1=1", []
+        for column, value in (("purpose", purpose),
+                              ("profile", profile)):
+            if value is not None:
+                sql += f" AND {column} = {self._ph}"
+                params.append(value)
+        rows = self._rows(sql + " ORDER BY seq", tuple(params))
+        return [self._model_run_row(row) for row in rows]
+
+    def insert_monitoring_board(self, board: dict) -> None:
+        self._insert_many(
+            "monitoring_boards",
+            ["board_id", "fingerprint", "as_of",
+             "rules_version", "payload"],
+            [(
+                board["board_id"], board["fingerprint"],
+                board["as_of"], board["rules_version"],
+                json.dumps(board),
+            )],
+        )
+
+    def _monitoring_board_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_monitoring_board(self, board_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM monitoring_boards "
+            f"WHERE board_id = {self._ph}",
+            (board_id,),
+        )
+        return self._monitoring_board_row(rows[0]) if rows else None
+
+    def list_monitoring_boards(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM monitoring_boards "
+            "ORDER BY as_of, board_id")
+        return [self._monitoring_board_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
