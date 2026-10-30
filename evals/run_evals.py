@@ -456,6 +456,40 @@ counters (all zero-tolerance):
                                    guarded integrity read that
                                    leaks held text or a board
                                    to a viewer
+
+Round 18 adds the cost, freshness & reliability
+monitoring counters (all zero-tolerance):
+  - cost_reconciliation_errors ... a recorded run whose
+                                   price disagrees with the
+                                   monitoring pack re-judged
+                                   here, a completed call
+                                   missing from the ledger, a
+                                   failed call recorded, or a
+                                   board cost that disagrees
+                                   with a direct ledger sum
+  - freshness_board_errors ....... a freshness state that
+                                   disagrees with the fold
+                                   taken here from the batch
+                                   reports and the registry
+                                   windows, or a never-loaded
+                                   source absent from the
+                                   board instead of named
+  - reliability_derivation_errors  a source or reporter
+                                   reliability line that
+                                   disagrees with the fold
+                                   taken here from batch
+                                   reports, corrections,
+                                   review acts and
+                                   screenings, or a rate
+                                   stated behind no decided
+                                   cases
+  - monitoring_board_errors ...... a monitoring board
+                                   that does not re-perform,
+                                   a tampered run or board
+                                   the verifier does not
+                                   name, or a guarded
+                                   monitoring read that
+                                   hands a board to a viewer
 """
 
 from __future__ import annotations
@@ -3453,7 +3487,237 @@ def main() -> int:
                for p in _problems17):
         counters["screening_errors"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17 evals — fertilizer market intelligence")
+    # -- Round 18: cost, freshness & reliability -------
+    # monitoring (F21-AM2). The ledger, the freshness
+    # states and both reliability folds are re-performed
+    # here from the store's own facts — batch reports,
+    # corrections, review acts and screenings — never
+    # from the monitoring engine's arithmetic.
+    import datetime as _dt18
+
+    from fertilizer_intelligence import ingest_rules \
+        as _ingest18
+    from fertilizer_intelligence import monitoring_rules \
+        as _monpack18
+    from fertilizer_intelligence.modelport import \
+        ModelReply as _Reply18
+    counters["cost_reconciliation_errors"] = 0
+    counters["freshness_board_errors"] = 0
+    counters["reliability_derivation_errors"] = 0
+    counters["monitoring_board_errors"] = 0
+    asof18 = "2026-04-24"
+
+    class _Stub18:
+        profile_name = "anthropic"
+        model_name = "eval-sonnet"
+
+        def complete(self, system, prompt):
+            return _Reply18(
+                text=prompt, profile=self.profile_name,
+                model=self.model_name,
+                input_tokens=1000, output_tokens=500)
+
+    class _Refusing18:
+        profile_name = "anthropic"
+        model_name = "eval-sonnet"
+
+        def complete(self, system, prompt):
+            raise RuntimeError("provider unavailable")
+
+    _prior_model18 = service.model
+    service.model = _Refusing18()
+    try:
+        service.draft_outlook_narrative(
+            "2025-26", "rabi", asof18)
+        counters["cost_reconciliation_errors"] += 1
+    except RuntimeError:
+        pass
+    service.model = _Stub18()
+    service.draft_outlook_narrative("2025-26", "kharif", asof18)
+    service.model = _prior_model18
+    _mine18 = [r for r in store.list_model_runs()
+               if r["profile"] == "anthropic"]
+    if len(_mine18) != 1 \
+            or _mine18[0]["purpose"] != "outlook_narrative" \
+            or _mine18[0]["input_tokens"] != 1000 \
+            or _mine18[0]["output_tokens"] != 500 \
+            or _mine18[0]["cost_nano_usd"] != 10_500_000 \
+            or _mine18[0]["cost_nano_usd"] != \
+            _monpack18.cost_nano_usd(
+                "anthropic", 1000, 500):
+        counters["cost_reconciliation_errors"] += 1
+    _seqs18 = [r["seq"] for r in store.list_model_runs()]
+    if _seqs18 != list(range(1, len(_seqs18) + 1)):
+        counters["cost_reconciliation_errors"] += 1
+    for _run18 in store.list_model_runs():
+        if _run18["cost_nano_usd"] != _monpack18.cost_nano_usd(
+                _run18["profile"], _run18["input_tokens"],
+                _run18["output_tokens"]):
+            counters["cost_reconciliation_errors"] += 1
+
+    def _price18(item, value, **over):
+        row = {
+            "series_kind": "product", "item": item,
+            "month": "2026-05", "price": value,
+            "unit": "INR/tonne", "source": "intl_price_feed",
+            "as_of": "2026-04-21",
+        }
+        row.update(over)
+        return row
+
+    _batch18 = service.load_connector_batch(
+        "intl_price_feed", [
+            _price18("SSP", 11200.0),
+            _price18("COMPLEX_20_20_0_13", 24800.0,
+                     as_of="2026-04-20"),
+            _price18("SSP", 11200.0),
+            _price18("SSP", -1.0, month="2026-06"),
+        ], "eval desk", "2026-04-22")
+    if _batch18["received"] != 4 or sum(
+            _batch18[k] for k in (
+                "inserted", "duplicates", "quarantined",
+                "refused")) != 4:
+        counters["reliability_derivation_errors"] += 1
+
+    def _land18(sub_id, detail):
+        outcome = service.sync_field_reports([{
+            "submission_id": sub_id,
+            "reporter": "M. Monitor (field officer)",
+            "district_id": "DST-GUN", "product": "DAP",
+            "signal_type": "stock_observed",
+            "observed_on": "2026-04-22",
+            "quantity_tonnes": 30.0, "detail": detail,
+            "source": "field_mobile_intake",
+        }], "2026-04-22")
+        return outcome["receipt"][0]["report_id"]
+
+    _rep18a = _land18("eval-mon-a", "Depot comfortable.")
+    _land18("eval-mon-b", "Short queue at the depot.")
+    service.review_field_report(
+        _rep18a, "confirm", "A. Rao", "corroborated",
+        "2026-04-23")
+
+    board18 = service.strike_monitoring_board(asof18)
+    _runs18 = [r for r in store.list_model_runs()
+               if r["at"] <= asof18]
+    if board18["cost"]["runs"] != len(_runs18) \
+            or board18["cost"]["cost_nano_usd"] != sum(
+                r["cost_nano_usd"] for r in _runs18) \
+            or board18["cost"]["input_tokens"] != sum(
+                r["input_tokens"] for r in _runs18):
+        counters["cost_reconciliation_errors"] += 1
+    # Freshness folded here from the batch reports.
+    _batches18 = [b for b in store.list_ingest_batches()
+                  if b["load_date"] <= asof18]
+    _by_source18: dict[str, list] = {}
+    for _b in _batches18:
+        _by_source18.setdefault(_b["source_id"], []).append(_b)
+    _fresh18 = {r["source_id"]: r for r in board18["freshness"]}
+    if set(_fresh18) != set(_ingest18.SOURCES):
+        counters["freshness_board_errors"] += 1
+    for _sid18, _spec18 in _ingest18.SOURCES.items():
+        _row18 = _fresh18.get(_sid18)
+        if _row18 is None:
+            counters["freshness_board_errors"] += 1
+            continue
+        _mine_b18 = _by_source18.get(_sid18, [])
+        if not _mine_b18:
+            if _row18["state"] != "never_loaded":
+                counters["freshness_board_errors"] += 1
+            continue
+        _last18 = max(
+            (_fact["as_of"] for _b in _mine_b18
+             for _fact in _b["inserted_rows"].values()),
+            default=None)
+        if _row18["batches"] != len(_mine_b18) \
+                or _row18["last_fact_as_of"] != _last18:
+            counters["freshness_board_errors"] += 1
+        if _last18 is not None:
+            _age18 = (_dt18.date.fromisoformat(asof18)
+                      - _dt18.date.fromisoformat(_last18)).days
+            _want18 = "fresh" if _age18 <= _spec18[
+                "freshness_days"] else "stale"
+            if _row18["state"] != _want18 \
+                    or _row18["age_days"] != _age18:
+                counters["freshness_board_errors"] += 1
+    # Reliability folded here from the same facts.
+    _rel18 = {r["source_id"]: r
+              for r in board18["reliability_sources"]}
+    if set(_rel18) != set(_by_source18):
+        counters["reliability_derivation_errors"] += 1
+    for _sid18, _mine_b18 in _by_source18.items():
+        _row18 = _rel18.get(_sid18)
+        if _row18 is None:
+            continue
+        for _k18 in ("received", "inserted", "duplicates",
+                     "quarantined", "refused"):
+            if _row18[_k18] != sum(
+                    b[_k18] for b in _mine_b18):
+                counters["reliability_derivation_errors"] += 1
+    _feed18 = _rel18.get("intl_price_feed")
+    if _feed18 is None or _feed18["received"] < 4:
+        counters["reliability_derivation_errors"] += 1
+    _rep_row18 = next(
+        (r for r in board18["reliability_reporters"]
+         if r["reporter"] == "M. Monitor (field officer)"),
+        None)
+    if _rep_row18 is None \
+            or _rep_row18["reports_landed"] != 2 \
+            or _rep_row18["decided"] != 1 \
+            or _rep_row18["confirmation_rate"] != 1.0:
+        counters["reliability_derivation_errors"] += 1
+    if any(r["confirmation_rate"] is not None
+           and r["decided"] == 0
+           for r in board18["reliability_reporters"]):
+        counters["reliability_derivation_errors"] += 1
+    if service.scoped_monitoring_board(
+            "Guest Viewer", board18["board_id"],
+            asof18) is not None:
+        counters["monitoring_board_errors"] += 1
+    _verify18 = service.verify_monitoring(asof18)
+    if not _verify18["verified"]:
+        counters["monitoring_board_errors"] += 1
+
+    # Tampers, last: a run's tokens and a board's
+    # totals rewritten behind the store's back — the
+    # verifier must name both.
+    _raw18 = _sqlite3.connect(settings.sqlite_path)
+    _row18 = _raw18.execute(
+        "SELECT payload FROM model_runs WHERE run_id = ?",
+        (_mine18[0]["run_id"],)).fetchone()
+    _payload18 = json.loads(_row18[0])
+    _payload18["output_tokens"] = 999
+    _raw18.execute(
+        "UPDATE model_runs SET payload = ? "
+        "WHERE run_id = ?",
+        (json.dumps(_payload18), _mine18[0]["run_id"]))
+    _raw18.commit()
+    _raw18.close()
+    _problems18 = service.verify_monitoring(
+        asof18)["problems"]
+    if not any(_mine18[0]["run_id"] in p
+               for p in _problems18):
+        counters["cost_reconciliation_errors"] += 1
+    _raw18 = _sqlite3.connect(settings.sqlite_path)
+    _row18 = _raw18.execute(
+        "SELECT payload FROM monitoring_boards "
+        "WHERE board_id = ?",
+        (board18["board_id"],)).fetchone()
+    _payload18 = json.loads(_row18[0])
+    _payload18["totals"]["cost_nano_usd"] = 1
+    _raw18.execute(
+        "UPDATE monitoring_boards SET payload = ? "
+        "WHERE board_id = ?",
+        (json.dumps(_payload18), board18["board_id"]))
+    _raw18.commit()
+    _raw18.close()
+    _problems18 = service.verify_monitoring(
+        asof18)["problems"]
+    if not any(board18["board_id"] in p
+               for p in _problems18):
+        counters["monitoring_board_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
