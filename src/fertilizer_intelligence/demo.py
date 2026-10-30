@@ -1302,24 +1302,24 @@ def main() -> int:
           f"offline draft in this demo is on the same ledger at "
           f"zero.")
     service.load_connector_batch("intl_price_feed", [
-        {"series_kind": "product", "item": "SSP",
-         "month": "2026-05", "price": 11200.0,
+        {"series_kind": "product", "item": "DAP",
+         "month": "2026-06", "price": 27100.0,
          "unit": "INR/tonne", "source": "intl_price_feed",
-         "as_of": "2026-04-27"},
-        {"series_kind": "product", "item": "COMPLEX_20_20_0_13",
-         "month": "2026-05", "price": 24800.0,
+         "as_of": "2026-05-05"},
+        {"series_kind": "product", "item": "UREA",
+         "month": "2026-06", "price": 5950.0,
          "unit": "INR/tonne", "source": "intl_price_feed",
-         "as_of": "2026-04-26"},
-        {"series_kind": "product", "item": "SSP",
-         "month": "2026-05", "price": 11200.0,
+         "as_of": "2026-05-04"},
+        {"series_kind": "product", "item": "DAP",
+         "month": "2026-06", "price": 27100.0,
          "unit": "INR/tonne", "source": "intl_price_feed",
-         "as_of": "2026-04-27"},
+         "as_of": "2026-05-05"},
         {"series_kind": "product", "item": "MOP",
-         "month": "2026-05", "price": -5.0,
+         "month": "2026-06", "price": -5.0,
          "unit": "INR/tonne", "source": "intl_price_feed",
-         "as_of": "2026-04-27"},
-    ], "demo desk", "2026-04-28")
-    board18 = service.strike_monitoring_board("2026-05-04")
+         "as_of": "2026-05-05"},
+    ], "demo desk", "2026-05-06")
+    board18 = service.strike_monitoring_board("2026-05-12")
     feed18 = next(r for r in board18["freshness"]
                   if r["source_id"] == "intl_price_feed")
     rel18 = next(r for r in board18["reliability_sources"]
@@ -1339,7 +1339,7 @@ def main() -> int:
           f"({rel18['quarantined']} of {rel18['received']}), "
           f"and the board's money reconciles with the "
           f"ledger to the nano: "
-          f"{service.verify_monitoring('2026-05-04')['verified']}.")
+          f"{service.verify_monitoring('2026-05-12')['verified']}.")
 
     print("\nDemo complete — every figure above came out of the store.")
     return 0
