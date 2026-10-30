@@ -67,10 +67,14 @@ SURFACE_SUBSCRIPTION = "subscription"
 # is a staff review surface, closed to viewers.
 SURFACE_FIELD_SCREENING = "field_screening"
 SURFACE_REPORTER_INTEGRITY = "reporter_integrity"
+# R18 adds one more, the same way: the monitoring
+# board — cost, freshness and reliability over the
+# whole book — is a staff surface, closed to viewers.
+SURFACE_MONITORING = "monitoring"
 SURFACES = (SURFACE_DISTRICT_LIST, SURFACE_COMPETITOR,
             SURFACE_EXPORT, SURFACE_ALERT_READ,
             SURFACE_SUBSCRIPTION, SURFACE_FIELD_SCREENING,
-            SURFACE_REPORTER_INTEGRITY)
+            SURFACE_REPORTER_INTEGRITY, SURFACE_MONITORING)
 
 # -- decisions ----------------------------------------------
 DECISION_ALLOWED = "allowed"

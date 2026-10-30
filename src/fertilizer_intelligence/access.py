@@ -211,6 +211,14 @@ def decide(store, principal: dict, surface: str,
         return {"decision": pack.DECISION_ALLOWED,
                 "reason": "the integrity board is a review "
                           "surface for named staff"}
+    if surface == pack.SURFACE_MONITORING:
+        if role == pack.ROLE_VIEWER:
+            return {"decision": pack.DECISION_REFUSED,
+                    "reason": "the monitoring board is "
+                              "closed to viewers"}
+        return {"decision": pack.DECISION_ALLOWED,
+                "reason": "the monitoring board is an "
+                          "operations surface for named staff"}
     if surface == pack.SURFACE_COMPETITOR:
         if role == pack.ROLE_VIEWER:
             return {"decision": pack.DECISION_REFUSED,

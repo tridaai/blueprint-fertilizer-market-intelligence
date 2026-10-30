@@ -26,6 +26,8 @@ from . import ingest_rules as ingest_pack
 from . import integrity as integrity_engine
 from . import integrity_rules as integrity_pack
 from . import market_map as map_engine
+from . import monitoring as monitoring_engine
+from . import monitoring_rules as monitoring_pack
 from . import movements as movement_engine
 from . import notes as notes_engine
 from . import notes_rules as notes_pack
@@ -163,7 +165,11 @@ class MarketService:
 
     def draft_outlook_narrative(self, crop_year, season, as_of) -> dict:
         outlook = self.demand_outlook(crop_year, season, as_of)
-        narrator = demand_engine.OutlookNarrator(self.store, self.model)
+        narrator = demand_engine.OutlookNarrator(
+            self.store,
+            monitoring_engine.RecordingPort(
+                self.model, self.store,
+                monitoring_pack.PURPOSE_OUTLOOK_NARRATIVE, as_of))
         return narrator.draft(outlook, as_of)
 
     def verify_narrative(self, narrative_id) -> list[str]:
@@ -955,7 +961,10 @@ class MarketService:
                 "asked_by is required — a dashboard question is "
                 "attributed, never anonymous")
         if port is not None or self.settings.model_profile != "offline":
-            model_port = port or get_model_port(self.settings.model_profile)
+            model_port = port or monitoring_engine.RecordingPort(
+                get_model_port(self.settings.model_profile),
+                self.store,
+                monitoring_pack.PURPOSE_DASHBOARD_PARSE, as_of)
             panels, parse = dashboard_engine.parse_question_model(
                 self.store, model_port, question)
         else:
@@ -1173,9 +1182,19 @@ class MarketService:
                 scenario_engine.parse_scenario_grammar(
                     self.store, question, base)
         else:
+            # The base artefact's date dates the run the
+            # ledger records for this parse; a base with
+            # no date leaves the port unwrapped rather
+            # than the run misdated.
+            port = self.model
+            if base.get("as_of"):
+                port = monitoring_engine.RecordingPort(
+                    self.model, self.store,
+                    monitoring_pack.PURPOSE_SCENARIO_PARSE,
+                    base["as_of"])
             kind, scope, records, gaps, parse = \
                 scenario_engine.parse_scenario_model(
-                    self.store, self.model, question, base)
+                    self.store, port, question, base)
         base = self._scenario_base(kind, scope)
         return self._store_fork(kind, scope, base, records, gaps, parse,
                                 asked_by, name)
@@ -1364,7 +1383,9 @@ class MarketService:
                 "a brief names who assembled it — an unnamed "
                 "assembly is refused")
         as_of = as_of or week_ending
-        model = port or self.model
+        model = port or monitoring_engine.RecordingPort(
+            self.model, self.store,
+            monitoring_pack.PURPOSE_WEEKLY_BRIEF, as_of)
         try:
             candidate = brief_engine.assemble_candidate(
                 self, week_ending, as_of, assembled_by, model)
@@ -2737,6 +2758,70 @@ class MarketService:
                     s["screening_id"]))
                 for s in self.store.list_field_screenings()),
             "boards": len(self.store.list_integrity_boards()),
+            "verified": not problems, "problems": problems}
+
+    # -- cost, freshness & reliability monitoring (R18) ---
+
+    def list_model_runs(self, purpose=None, profile=None) -> list[dict]:
+        """The run ledger: every call the service's own
+        port has completed, in sequence, each priced
+        by the monitoring pack."""
+        return self.store.list_model_runs(
+            purpose=purpose, profile=profile)
+
+    def strike_monitoring_board(self, as_of) -> dict:
+        """Strike the monitoring board at a date: the
+        cost ledger folded to the date, every source's
+        freshness judged against the registry window,
+        and the reliability lines for sources and
+        reporters. Re-striking at a later date
+        supersedes the head by link; the same strike
+        repeated is the same artefact."""
+        candidate = monitoring_engine.build_monitoring_board(
+            self.store, as_of)
+        existing = self.store.get_monitoring_board(
+            candidate.board_id)
+        if existing is not None:
+            return existing
+        head = demand_engine.head_of(
+            self.store.list_monitoring_boards(), "board_id")
+        if head is not None and head["as_of"] == as_of \
+                and head["fingerprint"] == candidate.fingerprint:
+            return head
+        candidate = candidate.model_copy(
+            update={"supersedes": head["board_id"] if head else None})
+        self.store.insert_monitoring_board(candidate.model_dump())
+        log.info("monitoring board stored: %s", candidate.board_id)
+        return self.store.get_monitoring_board(candidate.board_id)
+
+    def get_monitoring_board(self, board_id) -> dict | None:
+        return self.store.get_monitoring_board(board_id)
+
+    def list_monitoring_boards(self) -> list[dict]:
+        return self.store.list_monitoring_boards()
+
+    def scoped_monitoring_board(self, principal_name, board_id,
+                                at) -> dict | None:
+        """One monitoring board through the guard: an
+        operations surface for named staff, closed to
+        viewers, with every decision in the access log;
+        a refused or missing board reads as absent."""
+        board = self.store.get_monitoring_board(board_id)
+        entry = access_engine.record_entry(
+            self.store, principal_name,
+            access_pack.SURFACE_MONITORING,
+            board_id, None, None, at)
+        if board is None \
+                or entry["decision"] != access_pack.DECISION_ALLOWED:
+            return None
+        return board
+
+    def verify_monitoring(self, as_of) -> dict:
+        problems = monitoring_engine.verify_monitoring(
+            self.store, as_of)
+        return {
+            "runs": len(self.store.list_model_runs()),
+            "boards": len(self.store.list_monitoring_boards()),
             "verified": not problems, "problems": problems}
 
     def ready(self) -> bool:
