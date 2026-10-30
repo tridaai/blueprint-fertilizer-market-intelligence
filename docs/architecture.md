@@ -397,7 +397,7 @@ those steps; every state transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0016)
+## Data model (migrations 0001–0018)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -648,6 +648,25 @@ and acts; a board is a snapshot other artefacts
 never read, so its contents are re-performed on
 verification and nothing downstream can inherit a
 signal as a fact.
+
+Monitoring tables (0018): `model_runs` (one row per
+completed model call through the service's drafting
+port: sequence, purpose, profile, model, date and
+monitoring pack version as columns; the token
+counts, the pack-priced integer nano-USD cost and
+the prompt/reply hashes in the payload — text is
+never stored, and an unrated profile's cost is
+null, never zero) and `monitoring_boards` (one row
+per strike: its date and pack version as columns;
+the cost totals and per-profile/per-purpose
+breakdowns, the per-source freshness rows and
+reliability folds, and the per-reporter reliability
+rows in the payload). Freshness and reliability are
+folds over batch reports, corrections, review acts
+and screenings struck at the board's date; the
+board is a snapshot other artefacts never read, and
+its money is cross-checked against a direct sum
+over the run ledger on verification.
 
 ## Deployment
 

@@ -1043,6 +1043,52 @@ and never presents a stale figure as current.
   direct, role-marked and encoded injections and
   grades the discipline end to end.
 
+## What Round 18 adds
+
+- **A run ledger for every model call**
+  (roadmap F21-AM2) — the service's drafting
+  steps (outlook narratives, the weekly brief,
+  dashboard and scenario parses) record each
+  completed call as an insert-only run: the
+  purpose from a versioned monitoring pack, the
+  profile and model, the token counts the port
+  reports, and the price the pack puts on them —
+  integer nano-USD against stated reference
+  rates, never provider-billed figures. The
+  ledger stores hashes of prompt and reply,
+  never their text; a call that fails records
+  nothing, and a call on a profile the pack
+  carries no rate for stands as unrated, never
+  zero-priced. Sequence numbers are gapless, so
+  a missing run is a visible hole, not a quiet
+  absence.
+- **Freshness, judged per source** — a
+  monitoring board artefact strikes, for every
+  source in the ingest registry, the newest fact
+  its landed batches actually inserted and that
+  fact's age against the registry's own window:
+  fresh, stale, or never loaded. A source that
+  has never landed a batch is named in that
+  state on every board — never absent from the
+  list, never read as current.
+- **Reliability, folded not asserted** — the
+  same board folds per-source reliability from
+  the batch reports and the corrections ledger
+  (received, inserted, duplicates, quarantined,
+  refused, and the quarantine rate), and
+  per-reporter reliability from the review acts
+  and the screening record. A confirmation rate
+  is stated only behind decided cases; a
+  reporter with none reads as unmeasured, with
+  the reason named — never a flattering zero.
+  The board's money reconciles with the ledger
+  to the nano, the board reads through the R15
+  access guard like every guarded surface, and
+  an independent verifier re-performs the whole
+  layer — a tampered run or board is named, not
+  averaged away. `make monitoringcheck` stands
+  the discipline up end to end.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1313,7 +1359,7 @@ src/fertilizer_intelligence/
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0017 in sqlite + postgres dialects
+migrations/          0001-0018 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md

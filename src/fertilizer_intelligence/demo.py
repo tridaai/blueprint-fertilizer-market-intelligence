@@ -1272,6 +1272,75 @@ def main() -> int:
           f"layer re-performs: "
           f"{service.verify_integrity('2026-04-27')['verified']}.")
 
+    print("\n--- Round 18: cost, freshness & reliability monitoring ---")
+    from .modelport import ModelReply as _ModelReply18
+
+    class _PricedPort18:
+        """A hosted-profile stand-in with stated token
+        counts, so the ledger's arithmetic is on show."""
+
+        profile_name = "anthropic"
+        model_name = "demo-sonnet"
+
+        def complete(self, system, prompt):
+            return _ModelReply18(
+                text=prompt, profile=self.profile_name,
+                model=self.model_name,
+                input_tokens=1000, output_tokens=250)
+
+    _offline18 = service.model
+    service.model = _PricedPort18()
+    service.draft_outlook_narrative("2025-26", "kharif", "2026-04-28")
+    service.model = _offline18
+    run18 = service.list_model_runs()[-1]
+    print(f"  the kharif narrative was drafted through a hosted "
+          f"profile, and the call is on the ledger as "
+          f"{run18['run_id']}: {run18['input_tokens']} tokens in, "
+          f"{run18['output_tokens']} out, priced by the pack at "
+          f"{run18['cost_nano_usd']} nano-USD — the ledger keeps "
+          f"the counts and the price, never the text. Every "
+          f"offline draft in this demo is on the same ledger at "
+          f"zero.")
+    service.load_connector_batch("intl_price_feed", [
+        {"series_kind": "product", "item": "SSP",
+         "month": "2026-05", "price": 11200.0,
+         "unit": "INR/tonne", "source": "intl_price_feed",
+         "as_of": "2026-04-27"},
+        {"series_kind": "product", "item": "COMPLEX_20_20_0_13",
+         "month": "2026-05", "price": 24800.0,
+         "unit": "INR/tonne", "source": "intl_price_feed",
+         "as_of": "2026-04-26"},
+        {"series_kind": "product", "item": "SSP",
+         "month": "2026-05", "price": 11200.0,
+         "unit": "INR/tonne", "source": "intl_price_feed",
+         "as_of": "2026-04-27"},
+        {"series_kind": "product", "item": "MOP",
+         "month": "2026-05", "price": -5.0,
+         "unit": "INR/tonne", "source": "intl_price_feed",
+         "as_of": "2026-04-27"},
+    ], "demo desk", "2026-04-28")
+    board18 = service.strike_monitoring_board("2026-05-04")
+    feed18 = next(r for r in board18["freshness"]
+                  if r["source_id"] == "intl_price_feed")
+    rel18 = next(r for r in board18["reliability_sources"]
+                 if r["source_id"] == "intl_price_feed")
+    never18 = [r["source_id"] for r in board18["freshness"]
+               if r["state"] == "never_loaded"]
+    print(f"  the monitoring board ({board18['board_id']}) "
+          f"reads the operation plainly: the price feed is "
+          f"{feed18['state']} — its newest fact is "
+          f"{feed18['age_days']} days old against a "
+          f"{feed18['window_days']}-day window — and "
+          f"{len(never18)} registered sources have never "
+          f"landed a batch at all ({', '.join(never18[:2])} "
+          f"among them), named rather than absent. The "
+          f"feed's own batch record folds to a quarantine "
+          f"rate of {rel18['quarantine_rate']} "
+          f"({rel18['quarantined']} of {rel18['received']}), "
+          f"and the board's money reconciles with the "
+          f"ledger to the nano: "
+          f"{service.verify_monitoring('2026-05-04')['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 
