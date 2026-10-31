@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trida-blueprint-fertilizer-market-intelligence"
-version = "0.1.0"
+version = "1.0.0"
 description = "Trida AI Blueprint — Fertilizer & Agrochemical Market Intelligence Agent for a fictional Indian farm-input company, Kaveri Agro Inputs (reference prototype)"
 readme = "README.md"
 license = { text = "Apache-2.0" }
