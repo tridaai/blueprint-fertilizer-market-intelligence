@@ -130,9 +130,12 @@ figure from its pinned artefact and the narrative passes
 the shared figure check (migration 0010), builds export
 packs with a provenance appendix and a checksum manifest,
 and records publication as insert-only acts whose chains
-form the decision log. The LangGraph workflow (ingest →
-estimate → assemble → brief → publish gate) orchestrates
-those steps; every state transition is a stored artefact.
+form the decision log. The pipeline those steps belong to
+(ingest → estimate → assemble → brief → publish gate) runs
+through the service, and every state transition is a stored
+artefact. No LangGraph graph ships in 1.0.0 — `langgraph`
+is a pinned dependency the shipped code does not import;
+the README's honest status says so plainly.
 
 ## The invariants
 
@@ -397,7 +400,7 @@ those steps; every state transition is a stored artefact.
   wiring; unknown names and unconfigured hosted profiles raise.
   There is no code path that substitutes one profile for another.
 
-## Data model (migrations 0001–0018)
+## Data model (migrations 0001–0019)
 
 Fact tables (0001): `districts`, `area_facts`, `monsoon_facts`,
 `soil_facts`, `application_rates`, `consumption_facts`,
@@ -713,10 +716,11 @@ resolve through the same register.
 ## Deployment
 
 Multi-stage Dockerfile, non-root runtime user, port 8000. Compose
-brings up the agent, Postgres 16 (pgvector image, ahead of the
-retrieval rounds) and SeaweedFS as the S3-compatible object store
-under the service name `minio`. Configuration is environment-only;
-see `.env.example`.
+brings up the agent, Postgres 16 (the pgvector image — no vector
+retrieval ships in 1.0.0; the retrieval-shaped reads are the
+governed artefact selections described above) and SeaweedFS as
+the S3-compatible object store under the service name `minio`.
+Configuration is environment-only; see `.env.example`.
 
 The Postgres profile is a tested profile, not a hope: the full
 test suite runs against Postgres 16 with per-test schema

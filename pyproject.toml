@@ -23,9 +23,9 @@ dependencies = [
     "psycopg[binary]==3.2.9",
     # Provider calls are plain HTTPS; httpx is the one client for them.
     "httpx==0.28.1",
-    # Estimation primitives under the in-repo engines (R2+). The engines
-    # are stated code in this repo; numpy/pandas are utilities, never a
-    # black-box model.
+    # Pinned for analytical work at deployment time. The shipped
+    # engines are stated pure-Python code in this repo and import
+    # neither numpy nor pandas; nothing here is a black-box model.
     "numpy==2.2.6",
     "pandas==2.3.3",
 ]

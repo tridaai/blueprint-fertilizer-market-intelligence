@@ -1180,6 +1180,25 @@ and never presents a stale figure as current.
   integrationcheck` stands the whole layer up
   end to end.
 
+## What Round 20 adds
+
+Release hardening — **version 1.0.0**, no new features. The
+version is set in the package metadata, `__version__` and the
+lockfile; `CHANGELOG.md` records the full R1–R20 history; the
+release notes live in `docs/release-1.0.0.md` with the freeze
+figures and the honest limits. The docs were swept against the
+shipped tree and three stale promises corrected: the
+architecture note no longer claims a LangGraph workflow
+orchestrates the brief pipeline (the service performs those
+steps; no graph ships), the stack section above no longer
+promises DuckDB rollups or a future dashboard layer, and the
+data-model heading runs to migration 0019. The migration set
+was reviewed as a set — 19 files per dialect, identical names,
+gapless numbering, the runner's split discipline verified, both
+dialects applying cleanly in order with a re-run applying
+nothing. The WIP notice at the top stays: hands-on developer
+testing and the companion blog post are still outstanding.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1190,7 +1209,7 @@ dependency.
   DataStore shape** — demand, prices, imports, policy, competitor
   and field signals held in one ontology with provenance, the way
   Farmioc's agricultural data platform organises India's agri data.
-- **The dashboard and ask-in-plain-language layer (later rounds) is
+- **The dashboard and ask-in-plain-language layer (Round 8) is
   the [Trida Labs](https://tridalabs.com) TridaPad + AgentSQL
   shape** — natural language → governed query → dashboard, on a
   collaborative analytics surface. The tool ports in this repo are
@@ -1200,11 +1219,13 @@ dependency.
 
 ## Stack
 
-Python 3.12 · FastAPI · Pydantic · LangGraph (agent workflow in
-later rounds: ingest → estimate → assemble → brief → publish gate) ·
-PostgreSQL 16 as the system of record with SQLite for the offline
-profile · DuckDB for rollups (later rounds) · numpy/pandas under the
-stated in-repo estimation engine · model port with offline default
+Python 3.12 · FastAPI · Pydantic · the agent workflow (ingest →
+estimate → assemble → brief → publish gate) as the service's own
+pipeline of stored artefacts — LangGraph is pinned but no graph
+ships in 1.0.0 · PostgreSQL 16 as the system of record with SQLite
+for the offline profile · the stated in-repo estimation engine,
+pure Python (rollups are computed in code; numpy/pandas are
+pinned but the shipped engines import neither) · model port with offline default
 and fail-closed hosted profiles (Anthropic, Bedrock, NIM) ·
 S3-compatible object storage (SeaweedFS in compose) · uv with exact
 pins and a frozen `constraints.txt` · multi-stage non-root Docker.
@@ -1394,10 +1415,24 @@ SeaweedFS S3 gateway together.
   named, re-derived on read) — migration 0014, API +
   CLI surfaces, demo walk, tests and four new eval
   counters.
+- **Released as 1.0.0 in R20:** the full gate set frozen
+  green on the release tree (figures in
+  `docs/release-1.0.0.md`), and the migration set reviewed
+  clean as a set — 19 files per dialect, identical names,
+  numbering gapless 0001–0019, the runner's split discipline
+  verified, both dialects applying cleanly in order with a
+  re-run applying nothing.
 - **Not built yet:** the LangGraph agent-orchestration
   layer named in the stack (ingest → estimate →
   assemble → brief → publish gate); the artefact
   engines it would orchestrate are the rounds above.
+- **No vector retrieval ships.** The compose stack runs
+  the pgvector Postgres image, but no embedding or
+  vector-search surface exists in 1.0.0; the
+  retrieval-shaped reads are the governed artefact
+  selections of R8 and R15. numpy and pandas are likewise
+  pinned but unused by the shipped code — the engines are
+  pure stated Python.
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
