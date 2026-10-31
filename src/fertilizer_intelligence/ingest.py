@@ -46,6 +46,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from . import configuration as config_engine
 from . import ingest_rules as pack
 from . import models
 from .demand import head_of
@@ -97,6 +98,12 @@ class IngestBatch(BaseModel):
     quarantine: list[dict[str, Any]] = Field(default_factory=list)
     refusals: list[dict[str, Any]] = Field(default_factory=list)
     rules_version: str
+    # R19: the freshness configuration version whose window
+    # judged this batch's staleness (the code label when no
+    # register version was in force). None on batches struck
+    # before the register existed and on exchange-port loads,
+    # whose staleness is judged under the port's own entry.
+    freshness_version: str | None = None
 
 
 class QuarantineRecord(BaseModel):
@@ -284,7 +291,7 @@ def _semantic_problem(fact_class: str, content: dict, districts: set):
 
 
 def load_batch(store, source_id: str, rows: list, loaded_by: str,
-               load_date: str) -> dict:
+               load_date: str, source_entry_override: dict | None = None) -> dict:
     """Land one connector batch from a registered source.
 
     Compute-or-return on the batch fingerprint: replaying
@@ -292,15 +299,36 @@ def load_batch(store, source_id: str, rows: list, loaded_by: str,
     returns the stored report and lands nothing. Rows are
     graded in order against the stored facts plus the rows
     accepted earlier in this same batch, so a batch also
-    cannot land its own rows twice."""
-    entry = pack.source_entry(source_id)
-    if entry is None:
-        raise ValueError(f"unregistered ingest source: {source_id}")
+    cannot land its own rows twice.
+
+    Staleness is judged under the freshness window in
+    force at the load date (R19): the configuration
+    register's version when one governs the source, the
+    registry's window otherwise — and the batch names
+    the version it was judged under. A caller porting
+    its own registered feed (the exchange ports, R19)
+    passes its source entry as the override; those
+    loads judge staleness under the port's own window."""
+    if source_entry_override is not None:
+        entry = source_entry_override
+        freshness_version = None
+    else:
+        entry = pack.source_entry(source_id)
+        if entry is None:
+            raise ValueError(f"unregistered ingest source: {source_id}")
     fact_class = entry["fact_class"]
     try:
         load_day = date.fromisoformat(load_date)
     except ValueError:
         raise ValueError(f"load_date is not an ISO date: {load_date!r}")
+    if source_entry_override is None:
+        resolved = config_engine.resolve_config(
+            store, "freshness", load_date)
+        freshness_version = resolved["version_label"]
+        window = resolved["values"]["windows_days"].get(
+            source_id, entry["freshness_days"])
+        if window != entry["freshness_days"]:
+            entry = {**entry, "freshness_days": window}
     fingerprint = _fingerprint({
         "source_id": source_id, "fact_class": fact_class,
         "loaded_by": loaded_by, "load_date": load_date, "rows": rows,
@@ -370,6 +398,7 @@ def load_batch(store, source_id: str, rows: list, loaded_by: str,
         inserted_keys=inserted_keys, duplicate_keys=duplicate_keys,
         inserted_rows=inserted_rows, quarantine=quarantine,
         refusals=refusals, rules_version=pack.RULES_VERSION,
+        freshness_version=freshness_version,
     )
     store.insert_ingest_batch(batch.model_dump())
     for held in quarantine:

@@ -58,6 +58,7 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from . import configuration as config_engine
 from . import field_rules as pack
 from . import integrity as integrity_engine
 from .generator import PRODUCTS
@@ -402,10 +403,14 @@ def _fingerprint(material) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def _contribution_line(store, report: dict, as_of: str) -> dict:
+def _contribution_line(store, report: dict, as_of: str,
+                       cap: float | None = None) -> dict:
     """One report's weighted line at the assessment date:
     kind effect, freshness decay, review state, the cap —
-    every intermediate carried so the line re-performs."""
+    every intermediate carried so the line re-performs.
+    The cap defaults to the code pack's; a configuration
+    register version in force (R19) supplies its own."""
+    cap = pack.UNVERIFIED_CAP_PCT if cap is None else cap
     acts = [
         act for act in store.list_field_review_acts(report["report_id"])
         if act["as_of"] <= as_of
@@ -425,7 +430,7 @@ def _contribution_line(store, report: dict, as_of: str) -> dict:
         applied = uncapped
     elif state == pack.STATE_UNREVIEWED:
         applied = round(
-            max(-pack.UNVERIFIED_CAP_PCT, min(pack.UNVERIFIED_CAP_PCT, uncapped)),
+            max(-cap, min(cap, uncapped)),
             pack.CONTRIBUTION_DECIMALS,
         )
         capped = applied != uncapped
@@ -453,11 +458,15 @@ def _contribution_line(store, report: dict, as_of: str) -> dict:
     }
 
 
-def compute_assessment(store, district_id, product, crop_year, season, as_of) -> FieldSignalAssessment:
+def compute_assessment(store, district_id, product, crop_year, season, as_of,
+                       cap=None, version_label=None) -> FieldSignalAssessment:
     """Fold one cell's field reports into an adjustment
     against its head R2 demand estimate. The estimate must
     already be stored (the service ensures it); the estimate
-    is read, never mutated."""
+    is read, never mutated. `cap` is the field_signals
+    family's unverified cap in force (the code pack's by
+    default, or the configuration register's, R19); the
+    assessment names the version it was struck under."""
     head = head_of(
         store.list_estimates(district_id, product, crop_year, season),
         "estimate_id",
@@ -497,7 +506,7 @@ def compute_assessment(store, district_id, product, crop_year, season, as_of) ->
             for act in store.list_field_review_acts(report["report_id"])
             if act["as_of"] <= as_of
         )
-        lines.append(_contribution_line(store, report, as_of))
+        lines.append(_contribution_line(store, report, as_of, cap))
     adjustment_pct = round(
         sum(line["applied_pct"] for line in lines), pack.PCT_DECIMALS
     )
@@ -511,7 +520,8 @@ def compute_assessment(store, district_id, product, crop_year, season, as_of) ->
             [r["report_id"], r["payload_hash"]] for r in in_cell
         ),
         "acts": sorted(act_ids),
-        "rules_version": pack.RULES_VERSION,
+        "rules_version": version_label
+        if version_label is not None else pack.RULES_VERSION,
     })
     return FieldSignalAssessment(
         assessment_id=(
@@ -532,7 +542,8 @@ def compute_assessment(store, district_id, product, crop_year, season, as_of) ->
         adjustment_tonnes=round(adjusted - base, pack.TONNE_DECIMALS),
         adjusted_tonnes=adjusted,
         capped_report_ids=[line["report_id"] for line in lines if line["capped"]],
-        rules_version=pack.RULES_VERSION,
+        rules_version=version_label
+        if version_label is not None else pack.RULES_VERSION,
         fact_fingerprint=fingerprint,
     )
 
@@ -540,13 +551,23 @@ def compute_assessment(store, district_id, product, crop_year, season, as_of) ->
 def verify_assessment(store, assessment: dict) -> list[str]:
     """Re-perform a stored assessment from the stored
     reports, acts, estimate and pack: the recomputation must
-    equal the artefact, line for line and total for total."""
+    equal the artefact, line for line and total for total.
+    The cap is resolved by the version the assessment
+    names — the code pack's, or a configuration register
+    version's (R19) — never by whatever stands today."""
+    values = config_engine.values_for_label(
+        store, "field_signals", assessment["rules_version"])
+    if values is None:
+        return [f"assessment names unknown rule pack "
+                f"{assessment['rules_version']}"]
     try:
         fresh = compute_assessment(
             store,
             assessment["district_id"], assessment["product"],
             assessment["crop_year"], assessment["season"],
             assessment["as_of"],
+            cap=values["unverified_cap_pct"],
+            version_label=assessment["rules_version"],
         )
     except ValueError as exc:
         return [str(exc)]

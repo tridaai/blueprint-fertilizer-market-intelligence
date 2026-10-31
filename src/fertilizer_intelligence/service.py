@@ -17,15 +17,21 @@ from . import alert_rules as alert_pack
 from . import board as board_engine
 from . import brief as brief_engine
 from . import brief_rules as brief_pack
+from . import configuration as config_engine
+from . import configuration_rules as config_pack
 from . import dashboard as dashboard_engine
 from . import demand as demand_engine
 from . import field as field_engine
 from . import field_rules as field_pack
 from . import ingest as ingest_engine
 from . import ingest_rules as ingest_pack
+from . import integration as integration_engine
+from . import integration_rules as integration_pack
 from . import integrity as integrity_engine
 from . import integrity_rules as integrity_pack
 from . import market_map as map_engine
+from . import master as master_engine
+from . import master_rules as master_pack
 from . import monitoring as monitoring_engine
 from . import monitoring_rules as monitoring_pack
 from . import movements as movement_engine
@@ -198,15 +204,20 @@ class MarketService:
                 if self.store.get_movement(movement.movement_id) is None:
                     self.store.insert_movement(movement.model_dump())
                     movements_stored += 1
+        resolved = config_engine.resolve_config(
+            self.store, "alerts", as_of)
         alerts_fired = 0
         for series_kind, item in self._price_series():
             stored = self.store.list_movements(series_kind, item)
-            for payload in movement_engine.evaluate_movements(stored):
-                alert_id = movement_engine.alert_id_for(payload)
+            for payload in movement_engine.evaluate_movements(
+                    stored, resolved["values"]):
+                alert_id = movement_engine.alert_id_for(
+                    payload, resolved["version_label"])
                 if self.store.get_alert(alert_id) is not None:
                     continue
                 alert = movement_engine.PriceAlert(
-                    alert_id=alert_id, rules_version=alert_pack.RULES_VERSION,
+                    alert_id=alert_id,
+                    rules_version=resolved["version_label"],
                     as_of=as_of, **payload,
                 )
                 self.store.insert_alert(alert.model_dump())
@@ -214,6 +225,7 @@ class MarketService:
         summary = {
             "as_of": as_of,
             "rules_version": alert_pack.RULES_VERSION,
+            "alerts_config_version": resolved["version_label"],
             "movements_stored": movements_stored,
             "movements_total": len(self.store.list_movements()),
             "alerts_fired": alerts_fired,
@@ -415,9 +427,13 @@ class MarketService:
             raise ValueError(f"the outlook carries no rollup for {product}")
         self._position_chain(product, as_of)
         chain = supply_engine.compute_position_chain(self.store, product, as_of)
+        resolved = config_engine.resolve_config(
+            self.store, "gaps", as_of)
         artefact = supply_engine.compute_gap(
             self.store, product, crop_year, season, as_of,
             demand_tonnes, outlook["outlook_id"], chain,
+            band_values=resolved["values"],
+            version_label=resolved["version_label"],
         )
         if self.store.get_gap(artefact.gap_id) is not None:
             return self.store.get_gap(artefact.gap_id)
@@ -908,8 +924,12 @@ class MarketService:
         new report, a new act, a superseding estimate — store
         a new assessment superseding the head by link."""
         self.estimate_demand(district_id, product, crop_year, season, as_of)
+        resolved = config_engine.resolve_config(
+            self.store, "field_signals", as_of)
         artefact = field_engine.compute_assessment(
-            self.store, district_id, product, crop_year, season, as_of
+            self.store, district_id, product, crop_year, season, as_of,
+            cap=resolved["values"]["unverified_cap_pct"],
+            version_label=resolved["version_label"],
         )
         if self.store.get_field_assessment(artefact.assessment_id) is not None:
             return self.store.get_field_assessment(artefact.assessment_id)
@@ -2823,6 +2843,241 @@ class MarketService:
             "runs": len(self.store.list_model_runs()),
             "boards": len(self.store.list_monitoring_boards()),
             "verified": not problems, "problems": problems}
+
+    # -- admin configuration & master data (R19) --------
+
+    def seed_pack_config(self, family, editor, struck_on) -> dict:
+        """Strike a family's seed version: the code
+        pack's values under the code label, effective
+        from the beginning — the register's account of
+        what governed before the register existed."""
+        struck = config_engine.seed_pack_config(
+            self.store, family, editor, struck_on)
+        return struck if isinstance(struck, dict) \
+            else struck.model_dump()
+
+    def set_pack_config(self, family, values, effective_from,
+                        editor, struck_on) -> dict:
+        """Strike one configuration version for a
+        family: a complete validated snapshot, never
+        backdated, effective dates strictly rising,
+        its diff against the version in force the day
+        before derived and recorded. Artefacts struck
+        before its effective date keep the version
+        they name — a change is never retroactive."""
+        struck = config_engine.set_pack_config(
+            self.store, family, values, effective_from,
+            editor, struck_on)
+        return struck if isinstance(struck, dict) \
+            else struck.model_dump()
+
+    def get_pack_config_version(self, version_id) -> dict | None:
+        return self.store.get_pack_config_version(version_id)
+
+    def list_pack_config_versions(self, family=None) -> list[dict]:
+        return self.store.list_pack_config_versions(family=family)
+
+    def resolve_pack_config(self, family, on_date) -> dict:
+        """What governs a family at a date: the
+        register version in force, or the code pack."""
+        return config_engine.resolve_config(
+            self.store, family, on_date)
+
+    def verify_pack_config(self) -> dict:
+        problems = config_engine.verify_config(self.store)
+        return {
+            "versions": len(self.store.list_pack_config_versions()),
+            "verified": not problems, "problems": problems}
+
+    def seed_master_register(self, register, editor,
+                             struck_on) -> dict:
+        """Strike a register's seed version: the
+        baseline content read from the code and the
+        store, under the seed label."""
+        struck = master_engine.seed_master_register(
+            self.store, register, editor, struck_on)
+        return struck if isinstance(struck, dict) \
+            else struck.model_dump()
+
+    def set_master_version(self, register, content, effective_from,
+                           editor, struck_on) -> dict:
+        """Strike one master-data version: a complete
+        validated snapshot of the register, under the
+        same discipline as a configuration version —
+        never backdated, never an empty change."""
+        struck = master_engine.set_master_version(
+            self.store, register, content, effective_from,
+            editor, struck_on)
+        return struck if isinstance(struck, dict) \
+            else struck.model_dump()
+
+    def get_master_data_version(self, version_id) -> dict | None:
+        return self.store.get_master_data_version(version_id)
+
+    def list_master_data_versions(self, register=None) -> list[dict]:
+        return self.store.list_master_data_versions(register=register)
+
+    def resolve_master_data(self, register, on_date) -> dict:
+        """What a register holds at a date: the
+        version in force, or the baseline."""
+        return master_engine.resolve_master(
+            self.store, register, on_date)
+
+    def application_rates_in_force(self, on_date) -> dict:
+        """The application-rate table the demand
+        engine computes under at a date, with the
+        version label an estimate struck then names."""
+        label, rates = master_engine.rates_in_force(
+            self.store, on_date)
+        return {
+            "version_label": label,
+            "rates": [
+                {"crop": crop, "product": product,
+                 "rate_kg_ha": rate}
+                for (crop, product), rate in sorted(rates.items())],
+        }
+
+    def verify_master_data(self) -> dict:
+        problems = master_engine.verify_master(self.store)
+        return {
+            "versions": len(self.store.list_master_data_versions()),
+            "verified": not problems, "problems": problems}
+
+    # -- webhooks, tokens & exchange ports (R19) --------
+
+    def register_webhook(self, integration, endpoint, event_kinds,
+                         secret, registered_by, as_of) -> dict:
+        """Register a webhook subscription. The read
+        returned — like every read of a subscription —
+        states that a secret is set, never its value;
+        the secret serves signing and verification
+        only."""
+        sub = integration_engine.register_webhook(
+            self.store, integration, endpoint, event_kinds,
+            secret, registered_by, as_of)
+        return self.store.get_webhook_subscription(
+            sub.subscription_id)
+
+    def get_webhook_subscription(self, subscription_id) -> dict | None:
+        return self.store.get_webhook_subscription(subscription_id)
+
+    def list_webhook_subscriptions(self) -> list[dict]:
+        return self.store.list_webhook_subscriptions()
+
+    def set_webhook_active(self, subscription_id, act, actor,
+                           as_of, reason=None) -> dict:
+        """A disable or enable act on a subscription:
+        while disabled at a trigger's date, the
+        subscription receives no delivery for it."""
+        return integration_engine.set_webhook_active(
+            self.store, subscription_id, act, actor, as_of,
+            reason).model_dump()
+
+    def dispatch_webhooks(self, as_of) -> dict:
+        """Strike every webhook delivery the record
+        calls for at a date. Idempotent."""
+        return integration_engine.dispatch_webhooks(
+            self.store, as_of)
+
+    def list_webhook_deliveries(self, subscription_id=None) -> list[dict]:
+        return self.store.list_webhook_deliveries(
+            subscription_id=subscription_id)
+
+    def verify_webhooks(self) -> dict:
+        problems = integration_engine.verify_webhooks(self.store)
+        return {
+            "subscriptions":
+                len(self.store.list_webhook_subscriptions()),
+            "deliveries": len(self.store.list_webhook_deliveries()),
+            "verified": not problems, "problems": problems}
+
+    def issue_api_token(self, integration, scopes, issued_by,
+                        issued_at, secret=None) -> dict:
+        """Issue one scoped API token. The plaintext
+        is returned here, once — the store keeps only
+        its hash, and no read ever returns it."""
+        artefact, plaintext = integration_engine.issue_api_token(
+            self.store, integration, scopes, issued_by,
+            issued_at, secret)
+        return {"token": artefact, "plaintext": plaintext}
+
+    def revoke_api_token(self, token_id, actor, as_of,
+                         reason=None) -> dict:
+        return integration_engine.revoke_api_token(
+            self.store, token_id, actor, as_of, reason).model_dump()
+
+    def list_api_tokens(self) -> list[dict]:
+        return self.store.list_api_tokens()
+
+    def api_token_read(self, presented, kind, target_id, at) -> dict:
+        """One token-guarded read: judged against the
+        token's scopes and revocation acts, recorded
+        either way, served only when allowed."""
+        entry, payload = integration_engine.token_read(
+            self.store, presented, kind, target_id, at)
+        return {"decision": entry, "result": payload}
+
+    def list_token_decisions(self) -> list[dict]:
+        return self.store.list_token_decisions()
+
+    def verify_api_tokens(self) -> dict:
+        problems = integration_engine.verify_tokens(self.store)
+        return {
+            "tokens": len(self.store.list_api_tokens()),
+            "decisions": len(self.store.list_token_decisions()),
+            "verified": not problems, "problems": problems}
+
+    def import_exchange_batch(self, port, rows, loaded_by,
+                              as_of) -> dict:
+        """Land one inbound exchange batch: graded
+        against the port's contract as a batch —
+        one violation quarantines it whole — or
+        translated at the border and landed through
+        the data plane under the port's own feed."""
+        return integration_engine.import_exchange_batch(
+            self.store, port, rows, loaded_by, as_of).model_dump()
+
+    def get_exchange_batch(self, batch_id) -> dict | None:
+        return self.store.get_exchange_batch(batch_id)
+
+    def list_exchange_batches(self, port=None) -> list[dict]:
+        return self.store.list_exchange_batches(port=port)
+
+    def strike_exchange_feed(self, port, as_of, struck_by) -> dict:
+        """Strike one outbound feed artefact: rows
+        derived from artefacts alone, under a
+        checksum the verifier recomputes."""
+        return integration_engine.strike_exchange_feed(
+            self.store, port, as_of, struck_by).model_dump()
+
+    def get_exchange_feed(self, feed_id) -> dict | None:
+        return self.store.get_exchange_feed(feed_id)
+
+    def list_exchange_feeds(self, port=None) -> list[dict]:
+        return self.store.list_exchange_feeds(port=port)
+
+    def verify_exchange(self) -> dict:
+        problems = integration_engine.verify_exchange(self.store)
+        return {
+            "batches": len(self.store.list_exchange_batches()),
+            "feeds": len(self.store.list_exchange_feeds()),
+            "verified": not problems, "problems": problems}
+
+    def verify_integration(self) -> dict:
+        """The whole R19 surface re-performed: pack
+        configuration, master data, webhooks, tokens
+        and the exchange ports."""
+        sections = {
+            "pack_config": self.verify_pack_config(),
+            "master_data": self.verify_master_data(),
+            "webhooks": self.verify_webhooks(),
+            "api_tokens": self.verify_api_tokens(),
+            "exchange": self.verify_exchange(),
+        }
+        return {
+            "verified": all(
+                s["verified"] for s in sections.values()),
+            "sections": sections}
 
     def ready(self) -> bool:
         # Season actuals (R11) are an import class that is

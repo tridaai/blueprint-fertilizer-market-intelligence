@@ -50,6 +50,7 @@ from datetime import date
 
 from pydantic import BaseModel
 
+from . import configuration as config_engine
 from . import ingest_rules as ingest_pack
 from . import monitoring_rules as pack
 
@@ -212,9 +213,20 @@ def _cost_section(runs: list[dict]) -> dict:
 
 def _freshness_rows(store, as_of: str) -> list[dict]:
     board_day = date.fromisoformat(as_of)
+    # Freshness is judged under the windows in force at
+    # the board's date (R19): the configuration
+    # register's version when one governs, the ingest
+    # registry's otherwise. The board row carries the
+    # window it was judged under, so the re-performance
+    # in verify resolves the same way and compares.
+    windows = config_engine.resolve_config(
+        store, "freshness", as_of)["values"]["windows_days"]
     rows: list[dict] = []
     for source_id in sorted(ingest_pack.SOURCES):
-        entry = ingest_pack.SOURCES[source_id]
+        entry = {**ingest_pack.SOURCES[source_id],
+                 "freshness_days": windows.get(
+                     source_id,
+                     ingest_pack.SOURCES[source_id]["freshness_days"])}
         batches = [
             b for b in store.list_ingest_batches(source_id=source_id)
             if b["load_date"] <= as_of]

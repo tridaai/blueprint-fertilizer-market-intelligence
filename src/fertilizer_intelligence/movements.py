@@ -34,6 +34,7 @@ import json
 from pydantic import BaseModel
 
 from . import alert_rules as pack
+from . import configuration as config_engine
 
 RULE_MOM = "mom_move"
 RULE_BASELINE = "baseline_move"
@@ -160,15 +161,51 @@ def verify_movement(store, movement: dict) -> list[str]:
 # -- alert firing: a pure function of movements + pack ----------------------
 
 
-def evaluate_movements(movements: list[dict]) -> list[dict]:
+def _code_values() -> dict:
+    """The alerts family's values as the code pack
+    states them — the shape a register version (R19)
+    supplies when one is in force."""
+    return {
+        "mom_bands": pack.MOM_BANDS,
+        "baseline_bands": pack.BASELINE_BANDS,
+        "spike_pct": pack.SPIKE_PCT,
+        "spike_event_window_months": pack.SPIKE_EVENT_WINDOW_MONTHS,
+        "sustained_months": pack.SUSTAINED_MONTHS,
+        "sustained_min_monthly_pct": pack.SUSTAINED_MIN_MONTHLY_PCT,
+        "sustained_cumulative_pct": pack.SUSTAINED_CUMULATIVE_PCT,
+        "sustained_band": pack.SUSTAINED_BAND,
+    }
+
+
+def _band_for(values: dict, series_kind: str, rule: str,
+              abs_pct: float) -> str | None:
+    table = values["mom_bands"][series_kind] \
+        if rule == RULE_MOM else values["baseline_bands"][series_kind]
+    if abs_pct >= table["alert"]:
+        return "alert"
+    if abs_pct >= table["watch"]:
+        return "watch"
+    return None
+
+
+def evaluate_movements(movements: list[dict],
+                       values: dict | None = None) -> list[dict]:
     """Fire the pack's rules over one series' movements (dicts in
     the stored shape, any order). Returns the alert payloads the
     rules produce — alert ids are not assigned here, so the same
     output serves the firing pass and the verifier.
 
+    `values` is the alerts family's threshold snapshot: the code
+    pack's by default, or the configuration register's version in
+    force (R19) when the caller resolves one. The movement
+    windows themselves stay in the code pack — they shape the
+    movements, which are pack-versioned artefacts of their own.
+
     Each payload: {series_kind, item, rule_id, band, period_month,
     movement_ids, figures}.
     """
+    if values is None:
+        values = _code_values()
     series = sorted(movements, key=lambda m: m["month"])
     if not series:
         return []
@@ -188,9 +225,9 @@ def evaluate_movements(movements: list[dict]) -> list[dict]:
     last_spike_idx: int | None = None
     for idx, movement in enumerate(series):
         mom = movement["mom_pct"]
-        if mom is None or abs(mom) < pack.SPIKE_PCT:
+        if mom is None or abs(mom) < values["spike_pct"]:
             continue
-        if last_spike_idx is not None and idx - last_spike_idx <= pack.SPIKE_EVENT_WINDOW_MONTHS:
+        if last_spike_idx is not None and idx - last_spike_idx <= values["spike_event_window_months"]:
             continue
         fire(RULE_SPIKE, "alert", movement, [movement["movement_id"]], {"mom_pct": mom})
         last_spike_idx = idx
@@ -200,12 +237,12 @@ def evaluate_movements(movements: list[dict]) -> list[dict]:
     for movement in series:
         mom = movement["mom_pct"]
         if mom is not None:
-            band = pack.band_for(kind, RULE_MOM, abs(mom))
+            band = _band_for(values, kind, RULE_MOM, abs(mom))
             if band:
                 fire(RULE_MOM, band, movement, [movement["movement_id"]], {"mom_pct": mom})
         base = movement["baseline_pct"]
         if base is not None:
-            band = pack.band_for(kind, RULE_BASELINE, abs(base))
+            band = _band_for(values, kind, RULE_BASELINE, abs(base))
             if band:
                 fire(RULE_BASELINE, band, movement, [movement["movement_id"]],
                      {"baseline_pct": base, "baseline_mean": movement["baseline_mean"]})
@@ -214,14 +251,14 @@ def evaluate_movements(movements: list[dict]) -> list[dict]:
     # length, all months in one unbroken same-direction run, each
     # month at or over the floor, the window summing to at least
     # the cumulative floor. Fires once per run.
-    n = pack.SUSTAINED_MONTHS
+    n = values["sustained_months"]
     fired_runs: set[int] = set()
     run_id = -1
     run_direction = 0
     for idx, movement in enumerate(series):
         mom = movement["mom_pct"]
         direction = 0
-        if mom is not None and abs(mom) >= pack.SUSTAINED_MIN_MONTHLY_PCT:
+        if mom is not None and abs(mom) >= values["sustained_min_monthly_pct"]:
             direction = 1 if mom > 0 else -1
         if direction == 0 or direction != run_direction:
             run_id += 1
@@ -238,9 +275,9 @@ def evaluate_movements(movements: list[dict]) -> list[dict]:
             continue
         monthly = [m["mom_pct"] for m in window]
         cumulative = round(sum(monthly), 4)
-        if abs(cumulative) < pack.SUSTAINED_CUMULATIVE_PCT:
+        if abs(cumulative) < values["sustained_cumulative_pct"]:
             continue
-        fire(RULE_SUSTAINED, pack.SUSTAINED_BAND, window[-1],
+        fire(RULE_SUSTAINED, values["sustained_band"], window[-1],
              [m["movement_id"] for m in window],
              {"monthly_pcts": monthly, "cumulative_pct": cumulative})
         fired_runs.add(run)
@@ -249,13 +286,13 @@ def evaluate_movements(movements: list[dict]) -> list[dict]:
     return fired
 
 
-def alert_id_for(payload: dict) -> str:
+def alert_id_for(payload: dict, label: str | None = None) -> str:
     fingerprint = _fingerprint({
         "series": [payload["series_kind"], payload["item"]],
         "rule": payload["rule_id"],
         "period": payload["period_month"],
         "movements": payload["movement_ids"],
-        "rules": pack.RULES_VERSION,
+        "rules": label if label is not None else pack.RULES_VERSION,
     })
     return (
         f"ALR-{payload['series_kind']}-{payload['item']}-"
@@ -269,7 +306,9 @@ def verify_alert(store, alert: dict) -> list[str]:
     stored movements must produce this alert — same rule, same
     month, same band, same triggering movements."""
     problems: list[str] = []
-    if alert["rules_version"] != pack.RULES_VERSION:
+    values = config_engine.values_for_label(
+        store, "alerts", alert["rules_version"])
+    if values is None:
         return [f"alert names unknown rule pack {alert['rules_version']}"]
     for movement_id in alert["movement_ids"]:
         movement = store.get_movement(movement_id)
@@ -281,7 +320,8 @@ def verify_alert(store, alert: dict) -> list[str]:
         )
     movements = store.list_movements(alert["series_kind"], alert["item"])
     expected = {
-        (p["rule_id"], p["period_month"]): p for p in evaluate_movements(movements)
+        (p["rule_id"], p["period_month"]): p
+        for p in evaluate_movements(movements, values)
     }
     mine = expected.get((alert["rule_id"], alert["period_month"]))
     if mine is None:

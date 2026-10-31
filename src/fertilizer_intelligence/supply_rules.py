@@ -114,18 +114,31 @@ LEVEL_GAP_TIGHT_PCT = -10.0
 BAND_RANK = {"comfortable": 0, "tight": 1, "short": 2}
 
 
-def programme_band(cover_pct: float) -> str:
-    if cover_pct >= PROGRAMME_COVER_COMFORTABLE_PCT:
+def programme_band(cover_pct: float, comfortable: float | None = None,
+                   tight: float | None = None) -> str:
+    """The thresholds default to this pack's; a caller
+    holding a configuration register version (R19)
+    passes its stated pair instead — the band logic
+    itself never changes."""
+    comfortable = PROGRAMME_COVER_COMFORTABLE_PCT \
+        if comfortable is None else comfortable
+    tight = PROGRAMME_COVER_TIGHT_PCT if tight is None else tight
+    if cover_pct >= comfortable:
         return "comfortable"
-    if cover_pct >= PROGRAMME_COVER_TIGHT_PCT:
+    if cover_pct >= tight:
         return "tight"
     return "short"
 
 
-def level_band(gap_pct_of_demand: float) -> str:
-    if gap_pct_of_demand >= LEVEL_GAP_COMFORTABLE_PCT:
+def level_band(gap_pct_of_demand: float,
+               comfortable: float | None = None,
+               tight: float | None = None) -> str:
+    comfortable = LEVEL_GAP_COMFORTABLE_PCT \
+        if comfortable is None else comfortable
+    tight = LEVEL_GAP_TIGHT_PCT if tight is None else tight
+    if gap_pct_of_demand >= comfortable:
         return "comfortable"
-    if gap_pct_of_demand >= LEVEL_GAP_TIGHT_PCT:
+    if gap_pct_of_demand >= tight:
         return "tight"
     return "short"
 

@@ -48,6 +48,7 @@ import re
 from pydantic import BaseModel
 
 from . import demand_rules as rules
+from . import master as master_engine
 from .generator import PRODUCTS
 
 DRIVER_BASE = "base_area_rates"
@@ -182,9 +183,15 @@ def compute_estimate(store, district_id, product, crop_year, season, as_of,
         raise ValueError(
             f"no area facts for {district_id} {crop_year} {season}: unknown district-season"
         )
-    rate_map = {
-        (r["crop"], r["product"]): r["rate_kg_ha"] for r in store.application_rates()
-    }
+    # The rate table in force at the estimate's date
+    # (R19): the master-data register's version when
+    # one governs, the stored table otherwise. The
+    # estimate names the version it computed under;
+    # its verifier re-performs from the rates recorded
+    # on the base line, so a later table never moves
+    # an estimate already struck.
+    rate_table_version, rate_map = master_engine.rates_in_force(
+        store, as_of)
     consumed: list = [["triple", district_id, product, crop_year, season],
                       ["rules", rules.RULES_VERSION]]
 
@@ -377,7 +384,7 @@ def compute_estimate(store, district_id, product, crop_year, season, as_of,
         missing_drivers=missing,
         contributions=[ContributionLine(**line) for line in lines],
         rules_version=rules.RULES_VERSION,
-        rate_table_version=rules.RATE_TABLE_VERSION,
+        rate_table_version=rate_table_version,
         fact_fingerprint=fingerprint,
         as_of=as_of,
     )

@@ -47,6 +47,7 @@ import json
 
 from pydantic import BaseModel
 
+from . import configuration as config_engine
 from . import demand_rules
 from . import supply_rules as rules
 from .generator import CROP_YEARS, PRODUCTS
@@ -605,10 +606,15 @@ def verify_position(store, position: dict, lines: list[dict]) -> list[str]:
 
 
 def compute_gap(store, product, crop_year, season, as_of, demand_tonnes,
-                outlook_id, chain) -> SupplyGap:
+                outlook_id, chain, band_values=None,
+                version_label=None) -> SupplyGap:
     """Compute (but do not store) the season gap artefact. `chain`
     is the product's position chain (models), the demand figure
-    and its outlook are the caller's — the gap records both."""
+    and its outlook are the caller's — the gap records both.
+    `band_values` is the gaps family's threshold snapshot (the
+    code pack's by default, or the configuration register's
+    version in force, R19); the gap names the version its bands
+    were struck under in its rules_version and fingerprint."""
     _require_positionable(store, product)
     window = demand_rules.season_price_window(crop_year, season)
     as_of_month = as_of[:7]
@@ -633,18 +639,30 @@ def compute_gap(store, product, crop_year, season, as_of, demand_tonnes,
     available = round(opening + production_actual + credited, 3)
     gap_tonnes = round(available - demand_tonnes, 3)
     gap_pct = round((available - demand_tonnes) / demand_tonnes * 100.0, 4) if demand_tonnes else 0.0
-    level = rules.level_band(gap_pct)
+    if band_values is None:
+        level = rules.level_band(gap_pct)
+        programme_of = rules.programme_band
+    else:
+        level = rules.level_band(
+            gap_pct, band_values["level_gap_comfortable_pct"],
+            band_values["level_gap_tight_pct"])
+        programme_of = lambda cover_pct: rules.programme_band(
+            cover_pct,
+            band_values["programme_cover_comfortable_pct"],
+            band_values["programme_cover_tight_pct"])
     if due > 0:
-        programme = rules.programme_band(cover)
+        programme = programme_of(cover)
         band = rules.worse_band(programme, level)
         basis = "import_programme_cover" if rules.BAND_RANK[programme] >= rules.BAND_RANK[level] \
             else "level_gap"
     else:
         band, basis = level, "level_gap"
 
+    label = version_label if version_label is not None \
+        else rules.RULES_VERSION
     fingerprint = _fingerprint({
         "gap": [product, crop_year, season, as_of_month],
-        "rules": rules.RULES_VERSION,
+        "rules": label,
         "demand": [outlook_id, demand_tonnes],
         "positions": [by_month[m].position_id for m in position_months],
         "uncovered": uncovered,
@@ -672,7 +690,7 @@ def compute_gap(store, product, crop_year, season, as_of, demand_tonnes,
         gap_pct_of_demand=gap_pct,
         band=band, band_basis=basis,
         position_months=position_months, uncovered_months=uncovered,
-        rules_version=rules.RULES_VERSION,
+        rules_version=label,
         fact_fingerprint=fingerprint,
     )
 
@@ -683,7 +701,9 @@ def verify_gap(store, gap: dict) -> list[str]:
     and the programme test is re-run at the gap's as-of month.
     Every figure and the band must match."""
     problems: list[str] = []
-    if gap["rules_version"] != rules.RULES_VERSION:
+    band_values = config_engine.values_for_label(
+        store, "gaps", gap["rules_version"])
+    if band_values is None:
         return [f"gap names unknown rule pack {gap['rules_version']}"]
     outlook = store.get_outlook(gap["demand_outlook_id"])
     if outlook is None:
@@ -699,6 +719,7 @@ def verify_gap(store, gap: dict) -> list[str]:
     fresh = compute_gap(
         store, gap["product"], gap["crop_year"], gap["season"], gap["as_of"],
         demand, gap["demand_outlook_id"], chain,
+        band_values=band_values, version_label=gap["rules_version"],
     )
     if fresh.gap_id != gap["gap_id"]:
         problems.append("gap id does not match the re-performed fingerprint")
