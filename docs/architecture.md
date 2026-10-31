@@ -668,6 +668,48 @@ board is a snapshot other artefacts never read, and
 its money is cross-checked against a direct sum
 over the run ledger on verification.
 
+Admin & integration tables (0019):
+`pack_config_versions` and `master_data_versions`
+(one row per struck version: family or register,
+version label, effective date and editor as
+columns; the complete values/content snapshot and
+its derived diff in the payload) — the registers
+behind the resolution discipline the engines now
+share: **build resolves by the artefact's own
+date, verify resolves by the artefact's named
+version**. An engine striking a new artefact
+takes the version in force at its date and names
+it; a verifier re-performing an old one takes the
+values its name carries, so a later version can
+never move an artefact already struck, and a
+label nothing holds is refused as unknown.
+`webhook_subscriptions` (the payload holds the
+signing secret; the store's row reader redacts it
+on every surface, and one raw accessor exists for
+dispatch and verification alone), `webhook_controls`
+(disable/enable acts), `webhook_deliveries` (the
+artefact read plus its HMAC, content-addressed
+over subscription, trigger and payload),
+`api_tokens` (the payload carries the token's
+SHA-256 — the plaintext is never stored),
+`api_token_acts` (revocations) and
+`token_decisions` (one row per presented read,
+allowed or refused), and `exchange_batches` /
+`exchange_feeds` (the external rows and named
+violations, or the derived feed rows and their
+checksum). The exchange ports keep their own
+source registry in the integration pack, beside
+their contracts: the ingest registry — and the
+monitoring board that folds it, asserting exactly
+the six registered sources — is deliberately
+untouched, and port loads reach the data plane
+through `load_batch`'s entry override. Freshness
+is the one family judged at two moments: a load
+is judged under the window in force at its load
+date (and the batch names that version), a board
+under the window in force at its own date — both
+resolve through the same register.
+
 ## Deployment
 
 Multi-stage Dockerfile, non-root runtime user, port 8000. Compose

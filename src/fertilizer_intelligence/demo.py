@@ -1341,6 +1341,96 @@ def main() -> int:
           f"ledger to the nano: "
           f"{service.verify_monitoring('2026-05-12')['verified']}.")
 
+    print("\n--- Round 19: integration & admin configuration ---")
+    for _family19 in ("alerts", "gaps", "freshness",
+                      "field_signals"):
+        service.seed_pack_config(_family19, "demo desk",
+                                 "2026-01-05")
+    for _register19 in ("application_rates", "season_calendar",
+                        "districts", "products", "crops"):
+        service.seed_master_register(_register19, "demo desk",
+                                     "2026-01-05")
+    _watch19 = service.run_price_watch("2026-06-15")
+    _changed19 = dict(service.resolve_pack_config(
+        "alerts", "2026-06-15")["values"])
+    _changed19["spike_pct"] = 15.0
+    _version19 = service.set_pack_config(
+        "alerts", _changed19, "2026-07-01", "demo desk",
+        "2026-06-20")
+    _diff19 = ", ".join(
+        f"{d['field']} {d['from']} -> {d['to']}"
+        for d in _version19["diff"])
+    print(f"  the alert thresholds are now administered, not "
+          f"compiled in: version {_version19['version_label']} "
+          f"takes effect 2026-07-01 with exactly one change "
+          f"({_diff19}), struck by a named editor with its "
+          f"diff derived. The watch that already fired under "
+          f"{_watch19['alerts_config_version']} keeps its "
+          f"version — a threshold change never reaches "
+          f"backwards, and every alert still re-performs "
+          f"under the pack it names.")
+    _sub19 = service.register_webhook(
+        "erp-bridge", "https://example.invalid/hooks/erp",
+        ["price_alert"], "demo-secret", "demo desk",
+        "2026-06-10")
+    _dispatch19 = service.dispatch_webhooks("2026-06-16")
+    _deliveries19 = service.list_webhook_deliveries(
+        subscription_id=_sub19["subscription_id"])
+    print(f"  the ERP bridge subscribed to spike alerts on "
+          f"2026-06-10; dispatch struck "
+          f"{_dispatch19['deliveries_struck']} signed "
+          f"deliver{'y' if _dispatch19['deliveries_struck'] == 1 else 'ies'}, each carrying the alert exactly as "
+          f"the desk reads it and an HMAC the receiver can "
+          f"check. The subscription's own read shows "
+          f"secret_set={_sub19['secret_set']} — that a secret "
+          f"is set, never its value — and a second dispatch "
+          f"strikes nothing new.")
+    _issued19 = service.issue_api_token(
+        "crm-sync", ["alerts"], "demo desk", "2026-06-16",
+        secret="demo-token")
+    _alert19 = service.list_alerts()[0]
+    _allowed19 = service.api_token_read(
+        "demo-token", "alert", _alert19["alert_id"],
+        "2026-06-17")
+    _refused19 = service.api_token_read(
+        "demo-token", "gap", "GAP-none", "2026-06-17")
+    print(f"  the CRM sync holds a token scoped to alerts "
+          f"alone — the store keeps its hash, the plaintext "
+          f"existed only at issue. Its alert read is "
+          f"{_allowed19['decision']['decision']}; its gap "
+          f"read is {_refused19['decision']['decision']} — "
+          f"{_refused19['decision']['reason']} — and both "
+          f"judgements are on the record either way.")
+    _landed19 = service.import_exchange_batch(
+        "erp_production_in", [{
+            "material_code": "ERP-UREA", "period": "2026-05",
+            "planned_qty_kt": 120.0, "actual_qty_kt": 118.5,
+            "source": "erp_production_returns",
+            "as_of": "2026-06-10",
+        }], "demo desk", "2026-06-12")
+    _held19 = service.import_exchange_batch(
+        "erp_production_in", [{
+            "material_code": "ERP-UREA", "period": "2026-05",
+            "planned_qty_kt": 120.0, "actual_qty_kt": 118.5,
+            "source": "erp_production_returns",
+            "as_of": "2026-06-10",
+        }, {
+            "material_code": "ERP-XXX", "period": "2026-13",
+            "planned_qty_kt": -1.0, "actual_qty_kt": 2.0,
+            "source": "erp_production_returns",
+            "as_of": "2026-06-10",
+        }], "demo desk", "2026-06-12")
+    _violations19 = ", ".join(
+        sorted({v["violation"] for v in _held19["violations"]}))
+    print(f"  the ERP's production return lands translated — "
+          f"its ERP-UREA kilotonnes are the store's UREA "
+          f"tonnes ({_landed19['counts']['inserted']} row). "
+          f"The next batch carries one bad row among good "
+          f"ones, so the contract quarantines it whole "
+          f"({_violations19}) and nothing in it lands at "
+          f"all. The whole layer re-performs: "
+          f"{service.verify_integration()['verified']}.")
+
     print("\nDemo complete — every figure above came out of the store.")
     return 0
 

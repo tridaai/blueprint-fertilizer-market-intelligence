@@ -1089,6 +1089,97 @@ and never presents a stale figure as current.
   averaged away. `make monitoringcheck` stands
   the discipline up end to end.
 
+## What Round 19 adds
+
+- **Signed webhook deliveries** (roadmap
+  F21-IA1) — an integration subscribes to spike
+  alerts, gap-band changes and brief
+  publications. Dispatch strikes one insert-only
+  delivery per trigger: the payload is the
+  artefact read the system's own surfaces serve,
+  signed HMAC-SHA256 under the subscription's
+  secret. The secret is held to sign and to
+  verify — every read of a subscription states
+  that a secret is set, never its value. A
+  delivery covers a trigger on or after the
+  subscription's registration and only while it
+  stands active at the trigger's own date, so a
+  disable act silences what follows it and
+  rewrites nothing already earned; dispatch is
+  idempotent, and the verifier re-performs every
+  payload and signature and the completeness of
+  the set.
+- **Scoped API tokens** (roadmap F21-IA1) — a
+  token is issued to a named integration with
+  stated read scopes (alerts, gaps, briefs); the
+  plaintext exists only in the issuer's hands at
+  issue, and the store keeps its SHA-256. Every
+  presented read is judged — known token, not
+  revoked, kind in scope — and the judgement
+  lands as a decision entry either way, so a
+  refused read is as much on the record as an
+  allowed one. Revocation is an act, and a
+  revoked token refuses everything from its
+  date. The verifier re-judges every entry from
+  the token artefact and its acts.
+- **Exchange ports with stated contracts**
+  (roadmap F21-IA2) — the inbound ports speak an
+  external shape (material codes, kilotonnes,
+  period strings) and grade each batch against
+  the port's contract before anything is
+  translated: one violation — an unknown
+  material, a negative quantity, a malformed
+  period, a missing, extra or mis-sourced field,
+  an empty batch — quarantines the batch whole,
+  with the violations named on the batch
+  artefact and nothing landed anywhere. A
+  conforming batch is translated at the border
+  and lands through the production data plane
+  under the port's own registered feed, where
+  row-level fact discipline applies as it does
+  to every feed. Outbound feeds are artefacts
+  whose rows derive from artefacts alone under
+  a recomputed checksum. Shapes only: no vendor
+  is named, and nothing here claims to be one.
+- **Administered configuration** (roadmap
+  F21-AD2) — the threshold packs that used to
+  change only by code release (alert bands and
+  the spike/sustained rules, supply-gap bands,
+  ingest freshness windows, the field-signal
+  cap) are now registers of effective-dated
+  versions: a complete validated snapshot struck
+  by a named editor, never backdated, effective
+  dates strictly rising, its diff against the
+  version in force before it derived and
+  recorded, a change that changes nothing
+  refused. Engines resolve the version in force
+  at the artefact's own date and name it on the
+  artefact; verifiers resolve by the name the
+  artefact carries — so a threshold change is
+  never retroactive, and an old alert, gap,
+  batch, board or assessment re-performs under
+  exactly the values it was struck with. The
+  movement-shaping windows stay in code, stated
+  on the pack's face: they shape artefacts of
+  their own, not thresholds.
+- **Master data as versions** (roadmap
+  F21-AD1) — application rates, the season
+  calendar, districts, products and crops are
+  registers under the same versioning
+  discipline, seeded from the baseline the code
+  and the store hold today. The demand engine
+  computes under the rate table in force at the
+  estimate's date and names it on the estimate;
+  the estimate's verifier still re-performs from
+  the rates recorded on its own base line, so a
+  later table never moves an estimate already
+  struck. The remaining registers are versioned
+  records of reference, graded against the
+  state they describe — stated plainly, they
+  are not yet engine-wired. `make
+  integrationcheck` stands the whole layer up
+  end to end.
+
 ## Product lineage
 
 This blueprint follows patterns from the group's own products. It
@@ -1310,6 +1401,19 @@ SeaweedFS S3 gateway together.
 - **No live model has been called.** Hosted profiles are wired as
   adapters and refuse loudly until configured; the offline profile
   is what tests and evals run.
+- **R19's outward surfaces stop at the artefact.** A webhook
+  delivery is a struck, signed record of what would be sent —
+  no HTTP call is made to any endpoint; the transport belongs
+  to the integrator. The exchange ports are stated shapes with
+  local doubles behind them: no live ERP or CRM is connected,
+  and token reads guard this system's own read surface, not a
+  network perimeter. Of the master-data registers, only
+  application rates are engine-wired; the season calendar,
+  districts, products and crops are versioned records of
+  reference, graded against the state they describe. A
+  freshness-window change governs new loads — a batch already
+  judged keeps its judgement, and the correction machinery
+  remains the route for rows it held.
 - **Docker image build was not run** in the build sandbox (no
   daemon); the Dockerfile and compose file follow the portfolio's
   verified pattern and are reviewed statically.
@@ -1352,14 +1456,22 @@ src/fertilizer_intelligence/
   notify.py          subscriptions, derived deliveries + escalations, digests and their verifier
   integrity_rules.py the versioned integrity pack (screening rules, release vocabulary, spike bar)
   integrity.py       field-text screening, release fold, reporter-integrity boards and their verifier
+  monitoring_rules.py the versioned monitoring pack (run pricing, freshness states)
+  monitoring.py      the run ledger, monitoring boards and their verifier
+  configuration_rules.py the versioned configuration pack (families, value validation, diffs)
+  configuration.py   pack configuration versions: resolution by date, strikes, verifier
+  master_rules.py    the versioned master-data pack (registers, baseline content, validation)
+  master.py          master-data versions, the demand engine's rate resolution, verifier
+  integration_rules.py the versioned integration pack (webhook events, token scopes, exchange contracts)
+  integration.py     webhook subscriptions/deliveries, scoped tokens, exchange ports and their verifiers
   migrations.py      numbered migration runner
   store.py           the insert-only store port (SQLite / Postgres)
   modelport.py       offline default; hosted profiles fail closed
-  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest/notify/integrity wiring
+  service.py         dataset loading + engine/watch/supply/policy/share/field/dashboard/scenario/brief/ingest/notify/integrity/monitoring/configuration/master/integration wiring
   api.py             FastAPI surface
   cli.py             command-line surface (same reads and acts)
   demo.py            the planted-truth walk
-migrations/          0001-0018 in sqlite + postgres dialects
+migrations/          0001-0019 in sqlite + postgres dialects
 scripts/             demo + CLI + local harness + production smoke wrappers
 evals/               the eval gate
 docs/                architecture.md
