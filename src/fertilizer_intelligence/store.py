@@ -2448,6 +2448,354 @@ class MarketStore:
             "ORDER BY as_of, board_id")
         return [self._monitoring_board_row(row) for row in rows]
 
+    # -- R19: configuration, master data, integration ----------
+
+    def insert_pack_config_version(self, version: dict) -> None:
+        self._insert_many(
+            "pack_config_versions",
+            ["version_id", "fingerprint", "family", "version_label",
+             "effective_from", "editor", "payload"],
+            [(
+                version["version_id"], version["fingerprint"],
+                version["family"], version["version_label"],
+                version["effective_from"], version["editor"],
+                json.dumps(version),
+            )],
+        )
+
+    def _pack_config_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_pack_config_version(self, version_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM pack_config_versions "
+            f"WHERE version_id = {self._ph}",
+            (version_id,),
+        )
+        return self._pack_config_row(rows[0]) if rows else None
+
+    def list_pack_config_versions(self, family=None) -> list[dict]:
+        sql, params = "SELECT * FROM pack_config_versions WHERE 1=1", []
+        if family is not None:
+            sql += f" AND family = {self._ph}"
+            params.append(family)
+        rows = self._rows(
+            sql + " ORDER BY family, effective_from, version_id",
+            tuple(params))
+        return [self._pack_config_row(row) for row in rows]
+
+    def insert_master_data_version(self, version: dict) -> None:
+        self._insert_many(
+            "master_data_versions",
+            ["version_id", "fingerprint", "register", "version_label",
+             "effective_from", "editor", "payload"],
+            [(
+                version["version_id"], version["fingerprint"],
+                version["register"], version["version_label"],
+                version["effective_from"], version["editor"],
+                json.dumps(version),
+            )],
+        )
+
+    def _master_data_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_master_data_version(self, version_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM master_data_versions "
+            f"WHERE version_id = {self._ph}",
+            (version_id,),
+        )
+        return self._master_data_row(rows[0]) if rows else None
+
+    def list_master_data_versions(self, register=None) -> list[dict]:
+        sql, params = "SELECT * FROM master_data_versions WHERE 1=1", []
+        if register is not None:
+            sql += f" AND register = {self._ph}"
+            params.append(register)
+        rows = self._rows(
+            sql + " ORDER BY register, effective_from, version_id",
+            tuple(params))
+        return [self._master_data_row(row) for row in rows]
+
+    def insert_webhook_subscription(self, sub: dict) -> None:
+        self._insert_many(
+            "webhook_subscriptions",
+            ["subscription_id", "fingerprint", "integration",
+             "endpoint", "payload"],
+            [(
+                sub["subscription_id"], sub["fingerprint"],
+                sub["integration"], sub["endpoint"],
+                json.dumps(sub),
+            )],
+        )
+
+    def _webhook_subscription_row(self, row: dict) -> dict:
+        """The stored payload holds the signing secret —
+        signing and verification need it, no other read
+        does. Every read surface gets the redacted form:
+        that a secret is set, never its value."""
+        payload = json.loads(row.pop("payload"))
+        merged = {**row, **payload}
+        merged.pop("secret", None)
+        merged["secret_set"] = "secret" in payload
+        return merged
+
+    def get_webhook_subscription(self, subscription_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM webhook_subscriptions "
+            f"WHERE subscription_id = {self._ph}",
+            (subscription_id,),
+        )
+        return self._webhook_subscription_row(rows[0]) if rows else None
+
+    def list_webhook_subscriptions(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM webhook_subscriptions "
+            "ORDER BY subscription_id")
+        return [self._webhook_subscription_row(row) for row in rows]
+
+    def webhook_subscription_secret(self, subscription_id: str) -> str | None:
+        """The one raw accessor: the signing secret,
+        read only by dispatch and verification."""
+        rows = self._rows(
+            f"SELECT payload FROM webhook_subscriptions "
+            f"WHERE subscription_id = {self._ph}",
+            (subscription_id,),
+        )
+        if not rows:
+            return None
+        return json.loads(rows[0]["payload"]).get("secret")
+
+    def insert_webhook_control(self, control: dict) -> None:
+        self._insert_many(
+            "webhook_controls",
+            ["control_id", "fingerprint", "subscription_id",
+             "act", "actor", "as_of", "payload"],
+            [(
+                control["control_id"], control["fingerprint"],
+                control["subscription_id"], control["act"],
+                control["actor"], control["as_of"],
+                json.dumps(control),
+            )],
+        )
+
+    def _webhook_control_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_webhook_control(self, control_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM webhook_controls "
+            f"WHERE control_id = {self._ph}",
+            (control_id,),
+        )
+        return self._webhook_control_row(rows[0]) if rows else None
+
+    def list_webhook_controls(self, subscription_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM webhook_controls WHERE 1=1", []
+        if subscription_id is not None:
+            sql += f" AND subscription_id = {self._ph}"
+            params.append(subscription_id)
+        rows = self._rows(
+            sql + " ORDER BY as_of, control_id", tuple(params))
+        return [self._webhook_control_row(row) for row in rows]
+
+    def insert_webhook_delivery(self, delivery: dict) -> None:
+        self._insert_many(
+            "webhook_deliveries",
+            ["delivery_id", "fingerprint", "subscription_id",
+             "event_kind", "trigger_id", "payload"],
+            [(
+                delivery["delivery_id"], delivery["fingerprint"],
+                delivery["subscription_id"],
+                delivery["event_kind"], delivery["trigger_id"],
+                json.dumps(delivery),
+            )],
+        )
+
+    def _webhook_delivery_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_webhook_delivery(self, delivery_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM webhook_deliveries "
+            f"WHERE delivery_id = {self._ph}",
+            (delivery_id,),
+        )
+        return self._webhook_delivery_row(rows[0]) if rows else None
+
+    def list_webhook_deliveries(self, subscription_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM webhook_deliveries WHERE 1=1", []
+        if subscription_id is not None:
+            sql += f" AND subscription_id = {self._ph}"
+            params.append(subscription_id)
+        rows = self._rows(
+            sql + " ORDER BY subscription_id, event_kind, trigger_id",
+            tuple(params))
+        return [self._webhook_delivery_row(row) for row in rows]
+
+    def insert_api_token(self, token: dict) -> None:
+        self._insert_many(
+            "api_tokens",
+            ["token_id", "fingerprint", "integration", "payload"],
+            [(
+                token["token_id"], token["fingerprint"],
+                token["integration"],
+                json.dumps(token),
+            )],
+        )
+
+    def _api_token_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_api_token(self, token_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM api_tokens "
+            f"WHERE token_id = {self._ph}",
+            (token_id,),
+        )
+        return self._api_token_row(rows[0]) if rows else None
+
+    def list_api_tokens(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM api_tokens ORDER BY token_id")
+        return [self._api_token_row(row) for row in rows]
+
+    def insert_api_token_act(self, act: dict) -> None:
+        self._insert_many(
+            "api_token_acts",
+            ["act_id", "fingerprint", "token_id", "act",
+             "actor", "as_of", "payload"],
+            [(
+                act["act_id"], act["fingerprint"],
+                act["token_id"], act["act"], act["actor"],
+                act["as_of"],
+                json.dumps(act),
+            )],
+        )
+
+    def _api_token_act_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_api_token_act(self, act_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM api_token_acts "
+            f"WHERE act_id = {self._ph}",
+            (act_id,),
+        )
+        return self._api_token_act_row(rows[0]) if rows else None
+
+    def list_api_token_acts(self, token_id=None) -> list[dict]:
+        sql, params = "SELECT * FROM api_token_acts WHERE 1=1", []
+        if token_id is not None:
+            sql += f" AND token_id = {self._ph}"
+            params.append(token_id)
+        rows = self._rows(
+            sql + " ORDER BY as_of, act_id", tuple(params))
+        return [self._api_token_act_row(row) for row in rows]
+
+    def insert_token_decision(self, entry: dict) -> None:
+        self._insert_many(
+            "token_decisions",
+            ["decision_id", "fingerprint", "token_id", "kind",
+             "target", "decision", "at", "payload"],
+            [(
+                entry["decision_id"], entry["fingerprint"],
+                entry["token_id"], entry["kind"],
+                entry["target"], entry["decision"], entry["at"],
+                json.dumps(entry),
+            )],
+        )
+
+    def _token_decision_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_token_decision(self, decision_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM token_decisions "
+            f"WHERE decision_id = {self._ph}",
+            (decision_id,),
+        )
+        return self._token_decision_row(rows[0]) if rows else None
+
+    def list_token_decisions(self) -> list[dict]:
+        rows = self._rows(
+            "SELECT * FROM token_decisions ORDER BY at, decision_id")
+        return [self._token_decision_row(row) for row in rows]
+
+    def insert_exchange_batch(self, batch: dict) -> None:
+        self._insert_many(
+            "exchange_batches",
+            ["batch_id", "fingerprint", "port", "outcome",
+             "payload"],
+            [(
+                batch["batch_id"], batch["fingerprint"],
+                batch["port"], batch["outcome"],
+                json.dumps(batch),
+            )],
+        )
+
+    def _exchange_batch_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_exchange_batch(self, batch_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM exchange_batches "
+            f"WHERE batch_id = {self._ph}",
+            (batch_id,),
+        )
+        return self._exchange_batch_row(rows[0]) if rows else None
+
+    def list_exchange_batches(self, port=None) -> list[dict]:
+        sql, params = "SELECT * FROM exchange_batches WHERE 1=1", []
+        if port is not None:
+            sql += f" AND port = {self._ph}"
+            params.append(port)
+        rows = self._rows(
+            sql + " ORDER BY batch_id", tuple(params))
+        return [self._exchange_batch_row(row) for row in rows]
+
+    def insert_exchange_feed(self, feed: dict) -> None:
+        self._insert_many(
+            "exchange_feeds",
+            ["feed_id", "fingerprint", "port", "as_of",
+             "payload"],
+            [(
+                feed["feed_id"], feed["fingerprint"],
+                feed["port"], feed["as_of"],
+                json.dumps(feed),
+            )],
+        )
+
+    def _exchange_feed_row(self, row: dict) -> dict:
+        payload = json.loads(row.pop("payload"))
+        return {**row, **payload}
+
+    def get_exchange_feed(self, feed_id: str) -> dict | None:
+        rows = self._rows(
+            f"SELECT * FROM exchange_feeds "
+            f"WHERE feed_id = {self._ph}",
+            (feed_id,),
+        )
+        return self._exchange_feed_row(rows[0]) if rows else None
+
+    def list_exchange_feeds(self, port=None) -> list[dict]:
+        sql, params = "SELECT * FROM exchange_feeds WHERE 1=1", []
+        if port is not None:
+            sql += f" AND port = {self._ph}"
+            params.append(port)
+        rows = self._rows(
+            sql + " ORDER BY as_of, feed_id", tuple(params))
+        return [self._exchange_feed_row(row) for row in rows]
+
     def fact_counts(self) -> dict[str, int]:
         counts = {"districts": self._rows("SELECT COUNT(*) AS n FROM districts")[0]["n"]}
         for table in _FACT_TABLES:
