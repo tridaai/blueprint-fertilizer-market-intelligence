@@ -490,6 +490,78 @@ monitoring counters (all zero-tolerance):
                                    name, or a guarded
                                    monitoring read that
                                    hands a board to a viewer
+
+Round 19 adds the integration & admin configuration
+counters (all zero-tolerance):
+  - webhook_delivery_errors ...... a delivery whose
+                                   payload is not the
+                                   artefact read or whose
+                                   signature fails under
+                                   the subscription's
+                                   secret (recomputed
+                                   here), a delivery for
+                                   a trigger the fold
+                                   taken here does not
+                                   call for — before
+                                   registration, the
+                                   wrong family, or
+                                   while disabled — a
+                                   called-for delivery
+                                   missing, or a
+                                   subscription read
+                                   carrying its secret
+  - token_scope_errors ........... a token read whose
+                                   recorded judgement
+                                   disagrees with the
+                                   re-judgement taken
+                                   here from the token
+                                   artefact and its
+                                   acts, a read presented
+                                   but not recorded, an
+                                   allowed read served
+                                   nothing or a refused
+                                   read served a result,
+                                   or a token artefact
+                                   carrying a plaintext
+                                   secret instead of
+                                   its hash
+  - exchange_contract_errors ..... a landed exchange
+                                   batch whose rows
+                                   re-grade dirty or
+                                   land untranslated, a
+                                   violating batch that
+                                   lands anything at
+                                   all, or a feed whose
+                                   rows or checksum
+                                   disagree with the
+                                   fold taken here
+                                   from the artefacts
+  - pack_config_errors ........... a family's
+                                   resolution that
+                                   disagrees with the
+                                   by-date fold taken
+                                   here over its
+                                   versions, a version
+                                   whose diff does not
+                                   re-derive, or a
+                                   config change applied
+                                   retroactively — an
+                                   artefact re-performing
+                                   dirty under the
+                                   version it names
+  - master_version_errors ........ the rate table in
+                                   force that disagrees
+                                   with the fold taken
+                                   here over the rates
+                                   register, an estimate
+                                   naming a rate-table
+                                   version whose rates
+                                   do not reproduce its
+                                   base from its own
+                                   recorded lines, or a
+                                   register version
+                                   whose content does
+                                   not validate
 """
 
 from __future__ import annotations
@@ -3716,7 +3788,266 @@ def main() -> int:
                for p in _problems18):
         counters["monitoring_board_errors"] += 1
 
-    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18 evals — fertilizer market intelligence")
+    # -- Round 19: integration & admin configuration ---
+    # (F21-IA1 + F21-IA2 + F21-AD1 + F21-AD2). Every
+    # fold below is taken here from the store's own
+    # artefacts — versions, alerts, acts — never from
+    # the integration engines' arithmetic.
+    from fertilizer_intelligence import \
+        configuration_rules as _cfgpack19
+    from fertilizer_intelligence import \
+        integration_rules as _intpack19
+    counters["webhook_delivery_errors"] = 0
+    counters["token_scope_errors"] = 0
+    counters["exchange_contract_errors"] = 0
+    counters["pack_config_errors"] = 0
+    counters["master_version_errors"] = 0
+    asof19 = "2026-04-24"
+
+    for _family19 in _cfgpack19.FAMILIES:
+        service.seed_pack_config(
+            _family19, "eval desk", "2026-01-05")
+    for _register19 in ("application_rates",
+                         "season_calendar", "districts",
+                         "products", "crops"):
+        service.seed_master_register(
+            _register19, "eval desk", "2026-01-05")
+    # Resolution folded here: the latest version
+    # effective on or before the date, else the code
+    # pack — compared against the service at three
+    # dates around a struck change.
+    _changed19 = dict(service.resolve_pack_config(
+        "alerts", asof19)["values"])
+    _changed19["spike_pct"] = 15.0
+    _struck19 = service.set_pack_config(
+        "alerts", _changed19, "2026-07-01", "eval desk",
+        "2026-06-20")
+    _diff19 = _cfgpack19.diff_values(
+        _cfgpack19.code_values("alerts"), _changed19)
+    if _struck19["diff"] != _diff19 \
+            or [d["field"] for d in _diff19] != ["spike_pct"]:
+        counters["pack_config_errors"] += 1
+    _versions19 = store.list_pack_config_versions(
+        family="alerts")
+    for _on19, _want19 in ((asof19, 20.0),
+                           ("2026-08-01", 15.0)):
+        _fold19 = None
+        for _v19 in _versions19:
+            if _v19["effective_from"] <= _on19:
+                _fold19 = _v19
+        _mine19 = _fold19["values"] if _fold19 \
+            else _cfgpack19.code_values("alerts")
+        _svc19 = service.resolve_pack_config("alerts", _on19)
+        if _svc19["values"] != _mine19 \
+                or _svc19["values"]["spike_pct"] != _want19:
+            counters["pack_config_errors"] += 1
+    if not service.verify_pack_config()["verified"]:
+        counters["pack_config_errors"] += 1
+    # Never retroactive: every alert on file
+    # re-performs under the version it names, struck
+    # before the change was even seeded.
+    from fertilizer_intelligence import movements \
+        as _movements19
+    for _alert19 in store.list_alerts():
+        if _movements19.verify_alert(store, _alert19):
+            counters["pack_config_errors"] += 1
+    # The rates fold, and an estimate's named table.
+    _rates19 = service.application_rates_in_force(asof19)
+    _content19 = service.resolve_master_data(
+        "application_rates", asof19)["content"]
+    _fold19 = {(r["crop"], r["product"]): r["rate_kg_ha"]
+               for r in _content19["rates"]}
+    if {(r["crop"], r["product"]): r["rate_kg_ha"]
+            for r in _rates19["rates"]} != _fold19 \
+            or _rates19["version_label"] != "2026.10.1":
+        counters["master_version_errors"] += 1
+    _est19 = service.estimate_demand(
+        "DST-LUD", "DAP", "2025-26", "rabi", asof19)
+    if _est19["rate_table_version"] != "2026.10.1" \
+            or service.verify_estimate(
+                _est19["estimate_id"]) != []:
+        counters["master_version_errors"] += 1
+    if not service.verify_master_data()["verified"]:
+        counters["master_version_errors"] += 1
+
+    # Webhooks: the trigger fold taken here over the
+    # spike alerts, the signatures recomputed here.
+    service.run_price_watch(asof19)
+    _sub19 = service.register_webhook(
+        "eval-erp", "https://example.invalid/hooks/eval",
+        ["price_alert"], "eval-secret-19", "eval desk",
+        "2025-01-01")
+    if "secret" in _sub19 or not _sub19["secret_set"] \
+            or "eval-secret-19" in json.dumps(
+                service.list_webhook_subscriptions()):
+        counters["webhook_delivery_errors"] += 1
+    service.dispatch_webhooks(asof19)
+    _want19 = {a["alert_id"] for a in store.list_alerts()
+               if a["rule_id"] == "spike"
+               and a["as_of"] <= asof19}
+    _mine19 = service.list_webhook_deliveries(
+        subscription_id=_sub19["subscription_id"])
+    if {d["trigger_id"] for d in _mine19} != _want19:
+        counters["webhook_delivery_errors"] += 1
+    for _d19 in _mine19:
+        _alert19 = service.get_alert(_d19["trigger_id"])
+        if _d19["payload"] != _alert19 \
+                or _d19["signature"] != _intpack19.sign(
+                    "eval-secret-19", _d19["payload"]):
+            counters["webhook_delivery_errors"] += 1
+    if service.dispatch_webhooks(
+            asof19)["deliveries_struck"] != 0:
+        counters["webhook_delivery_errors"] += 1
+
+    # Tokens: every judgement re-judged here from the
+    # artefact and its acts.
+    _issued19 = service.issue_api_token(
+        "eval-crm", ["alerts"], "eval desk", "2026-04-24",
+        secret="eval-token-19")
+    _tok19 = _issued19["token"]
+    if "eval-token-19" in json.dumps(_tok19) \
+            or _tok19["secret_sha256"] != \
+            _intpack19.secret_hash("eval-token-19"):
+        counters["token_scope_errors"] += 1
+    _any_alert19 = store.list_alerts()[0]
+    _reads19 = [
+        service.api_token_read(
+            "eval-token-19", "alert",
+            _any_alert19["alert_id"], "2026-04-24"),
+        service.api_token_read(
+            "eval-token-19", "gap", "GAP-none",
+            "2026-04-24"),
+        service.api_token_read(
+            "eval-unknown", "alert",
+            _any_alert19["alert_id"], "2026-04-24"),
+    ]
+    if [r["decision"]["decision"] for r in _reads19] != \
+            ["allowed", "refused", "refused"]:
+        counters["token_scope_errors"] += 1
+    if _reads19[0]["result"] is None \
+            or _reads19[1]["result"] is not None \
+            or _reads19[2]["result"] is not None:
+        counters["token_scope_errors"] += 1
+    if len(service.list_token_decisions()) != 3:
+        counters["token_scope_errors"] += 1
+    service.revoke_api_token(
+        _tok19["token_id"], "eval desk", "2026-04-24",
+        "eval rotation")
+    _after19 = service.api_token_read(
+        "eval-token-19", "alert", _any_alert19["alert_id"],
+        "2026-04-24")
+    if _after19["decision"]["decision"] != "refused":
+        counters["token_scope_errors"] += 1
+    if not service.verify_api_tokens()["verified"]:
+        counters["token_scope_errors"] += 1
+
+    # Exchange: translation re-performed here, the
+    # whole-batch rule, the feed fold.
+    _row19 = {
+        "material_code": "ERP-UREA", "period": "2026-05",
+        "planned_qty_kt": 120.0, "actual_qty_kt": 118.5,
+        "source": "erp_production_returns",
+        "as_of": "2026-04-21",
+    }
+    _facts_before19 = len(store.supply_facts(product="UREA"))
+    _landed19 = service.import_exchange_batch(
+        "erp_production_in", [_row19], "eval desk", asof19)
+    if _landed19["outcome"] != "landed":
+        counters["exchange_contract_errors"] += 1
+    else:
+        from fertilizer_intelligence import ingest \
+            as _ingest_engine19
+        from fertilizer_intelligence import \
+            integration as _integration19
+        _report19 = store.get_ingest_batch(
+            _landed19["ingest_batch_id"])
+        _held19 = {h["natural_key"]
+                   for h in _report19["quarantine"]}
+        _content19 = _ingest_engine19._content(
+            "supply_facts", _integration19.translate_row(
+                "erp_production_in", _row19))
+        _label19 = _ingest_engine19.pack.key_label(
+            "supply_facts",
+            _ingest_engine19.pack.natural_key(
+                "supply_facts", _content19))
+        if _label19 in _report19["inserted_keys"]:
+            _fact19 = next(
+                (f for f in store.supply_facts(
+                    product="UREA")
+                 if f["month"] == "2026-05"), None)
+            if _fact19 is None or (
+                    _fact19["planned_tonnes"] != 120000.0
+                    or _fact19["actual_tonnes"]
+                    != 118500.0):
+                counters["exchange_contract_errors"] += 1
+        elif _label19 not in _report19["duplicate_keys"] \
+                and _label19 not in _held19:
+            counters["exchange_contract_errors"] += 1
+    _before_bad19 = len(store.supply_facts(product="UREA"))
+    _bad19 = service.import_exchange_batch(
+        "erp_production_in",
+        [dict(_row19, material_code="ERP-XXX")],
+        "eval desk", asof19)
+    if _bad19["outcome"] != "quarantined_whole" \
+            or len(store.supply_facts(product="UREA")) \
+            != _before_bad19:
+        counters["exchange_contract_errors"] += 1
+    _feed19 = service.strike_exchange_feed(
+        "crm_alert_feed", asof19, "eval desk")
+    _fold_rows19 = [{
+        "alert_id": a["alert_id"],
+        "series_kind": a["series_kind"], "item": a["item"],
+        "rule_id": a["rule_id"], "band": a["band"],
+        "period_month": a["period_month"],
+        "state": _movements19.derive_state(
+            store.list_alert_acts(a["alert_id"])),
+        "as_of": a["as_of"],
+    } for a in store.list_alerts() if a["as_of"] <= asof19]
+    _fold_rows19.sort(key=lambda r: r["alert_id"])
+    if _feed19["rows"] != _fold_rows19 \
+            or _feed19["checksum"] != _intpack19.checksum(
+                _feed19["rows"]):
+        counters["exchange_contract_errors"] += 1
+    if not service.verify_exchange()["verified"]:
+        counters["exchange_contract_errors"] += 1
+    _whole19 = service.verify_integration()
+    if not _whole19["verified"]:
+        _map19 = {
+            "pack_config": "pack_config_errors",
+            "master_data": "master_version_errors",
+            "webhooks": "webhook_delivery_errors",
+            "api_tokens": "token_scope_errors",
+            "exchange": "exchange_contract_errors",
+        }
+        for _section19, _counter19 in _map19.items():
+            if not _whole19["sections"][_section19][
+                    "verified"]:
+                counters[_counter19] += 1
+
+    # Tamper, last: a delivery's signature rewritten
+    # behind the store's back — the verifier must
+    # name the delivery.
+    if _mine19:
+        _raw19 = _sqlite3.connect(settings.sqlite_path)
+        _row19 = _raw19.execute(
+            "SELECT payload FROM webhook_deliveries "
+            "WHERE delivery_id = ?",
+            (_mine19[0]["delivery_id"],)).fetchone()
+        _payload19 = json.loads(_row19[0])
+        _payload19["signature"] = "0" * 64
+        _raw19.execute(
+            "UPDATE webhook_deliveries SET payload = ? "
+            "WHERE delivery_id = ?",
+            (json.dumps(_payload19),
+             _mine19[0]["delivery_id"]))
+        _raw19.commit()
+        _raw19.close()
+        _problems19 = service.verify_webhooks()["problems"]
+        if not any(_mine19[0]["delivery_id"] in p
+                   for p in _problems19):
+            counters["webhook_delivery_errors"] += 1
+
+    print("Round 1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18+19 evals — fertilizer market intelligence")
     for name, value in counters.items():
         print(f"  {name}: {value} (required 0)")
     failed = [n for n, v in counters.items() if v != 0]
