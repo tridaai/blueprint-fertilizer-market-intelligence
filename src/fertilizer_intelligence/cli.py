@@ -715,6 +715,120 @@ def main(argv=None) -> int:
     p = sub.add_parser("verify-monitoring", help="re-perform run records and monitoring boards")
     p.add_argument("--as-of", required=True)
 
+    p = sub.add_parser("config-seed", help="strike a pack family's seed version (the code pack's values, from the beginning)")
+    p.add_argument("--family", required=True)
+    p.add_argument("--editor", required=True)
+    p.add_argument("--struck-on", required=True)
+
+    p = sub.add_parser("config-set", help="strike one pack configuration version (values as a JSON file)")
+    p.add_argument("--family", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--effective-from", required=True)
+    p.add_argument("--editor", required=True)
+    p.add_argument("--struck-on", required=True)
+
+    p = sub.add_parser("config-versions", help="list struck pack configuration versions")
+    p.add_argument("--family", default=None)
+
+    p = sub.add_parser("config-resolve", help="what governs a pack family at a date")
+    p.add_argument("--family", required=True)
+    p.add_argument("--on", required=True)
+
+    p = sub.add_parser("verify-config", help="re-perform the pack configuration register")
+
+    p = sub.add_parser("master-seed", help="strike a master register's seed version (the baseline content)")
+    p.add_argument("--register", required=True)
+    p.add_argument("--editor", required=True)
+    p.add_argument("--struck-on", required=True)
+
+    p = sub.add_parser("master-set", help="strike one master-data version (content as a JSON file)")
+    p.add_argument("--register", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--effective-from", required=True)
+    p.add_argument("--editor", required=True)
+    p.add_argument("--struck-on", required=True)
+
+    p = sub.add_parser("master-versions", help="list struck master-data versions")
+    p.add_argument("--register", default=None)
+
+    p = sub.add_parser("master-resolve", help="what a master register holds at a date")
+    p.add_argument("--register", required=True)
+    p.add_argument("--on", required=True)
+
+    p = sub.add_parser("rates-in-force", help="the application-rate table in force at a date, with its version label")
+    p.add_argument("--on", required=True)
+
+    p = sub.add_parser("verify-master", help="re-perform the master-data registers")
+
+    p = sub.add_parser("webhook-register", help="register a webhook subscription (its secret is never read back)")
+    p.add_argument("--integration", required=True)
+    p.add_argument("--endpoint", required=True)
+    p.add_argument("--events", required=True,
+                   help="comma-separated event families")
+    p.add_argument("--secret", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("webhooks", help="list webhook subscriptions (secrets redacted)")
+    p = sub.add_parser("webhook-dispatch", help="strike every webhook delivery the record calls for at a date")
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("webhook-set-active", help="disable or enable a webhook subscription by a named act")
+    p.add_argument("subscription_id")
+    p.add_argument("--act", required=True, choices=["disable", "enable"])
+    p.add_argument("--actor", required=True)
+    p.add_argument("--as-of", required=True)
+    p.add_argument("--reason", default=None)
+
+    p = sub.add_parser("webhook-deliveries", help="list struck webhook deliveries")
+    p.add_argument("--subscription", default=None)
+
+    p = sub.add_parser("verify-webhooks", help="re-perform webhook deliveries and their signatures")
+
+    p = sub.add_parser("token-issue", help="issue a scoped API token (the plaintext is printed once)")
+    p.add_argument("--integration", required=True)
+    p.add_argument("--scopes", required=True,
+                   help="comma-separated read scopes")
+    p.add_argument("--by", required=True)
+    p.add_argument("--at", required=True)
+    p.add_argument("--secret", default=None)
+
+    p = sub.add_parser("tokens", help="list issued API tokens (hashes only)")
+    p = sub.add_parser("token-revoke", help="revoke an API token by a named act")
+    p.add_argument("token_id")
+    p.add_argument("--actor", required=True)
+    p.add_argument("--as-of", required=True)
+    p.add_argument("--reason", default=None)
+
+    p = sub.add_parser("token-read", help="one token-guarded read — judged, recorded, served only when allowed")
+    p.add_argument("--token", required=True)
+    p.add_argument("--kind", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--at", required=True)
+
+    p = sub.add_parser("token-decisions", help="every token read judgement on record")
+    p = sub.add_parser("verify-tokens", help="re-perform token artefacts and decision entries")
+
+    p = sub.add_parser("exchange-import", help="land one inbound exchange batch (rows as a JSON file); a contract violation quarantines it whole")
+    p.add_argument("--port", required=True)
+    p.add_argument("--file", required=True)
+    p.add_argument("--loaded-by", required=True)
+    p.add_argument("--as-of", required=True)
+
+    p = sub.add_parser("exchange-batches", help="list exchange batches")
+    p.add_argument("--port", default=None)
+
+    p = sub.add_parser("exchange-feed", help="strike one outbound exchange feed artefact")
+    p.add_argument("--port", required=True)
+    p.add_argument("--as-of", required=True)
+    p.add_argument("--by", required=True)
+
+    p = sub.add_parser("exchange-feeds", help="list struck exchange feeds")
+    p.add_argument("--port", default=None)
+
+    p = sub.add_parser("verify-exchange", help="re-perform exchange batches and feeds")
+    p = sub.add_parser("verify-integration", help="re-perform the whole R19 surface: config, master data, webhooks, tokens, exchange")
+
     p = sub.add_parser("pack", help="export a product, region or territory report pack")
     p.add_argument("--kind", required=True, choices=["product", "region", "territory"])
     p.add_argument("--key", required=True)
@@ -1525,6 +1639,96 @@ def main(argv=None) -> int:
                 return 2
         elif args.command == "verify-monitoring":
             result = service.verify_monitoring(args.as_of)
+        elif args.command == "config-seed":
+            result = service.seed_pack_config(
+                args.family, args.editor, args.struck_on)
+        elif args.command == "config-set":
+            values = json.loads(
+                Path(args.file).read_text(encoding="utf-8"))
+            result = service.set_pack_config(
+                args.family, values, args.effective_from,
+                args.editor, args.struck_on)
+        elif args.command == "config-versions":
+            result = service.list_pack_config_versions(
+                family=args.family)
+        elif args.command == "config-resolve":
+            result = service.resolve_pack_config(
+                args.family, args.on)
+        elif args.command == "verify-config":
+            result = service.verify_pack_config()
+        elif args.command == "master-seed":
+            result = service.seed_master_register(
+                args.register, args.editor, args.struck_on)
+        elif args.command == "master-set":
+            content = json.loads(
+                Path(args.file).read_text(encoding="utf-8"))
+            result = service.set_master_version(
+                args.register, content, args.effective_from,
+                args.editor, args.struck_on)
+        elif args.command == "master-versions":
+            result = service.list_master_data_versions(
+                register=args.register)
+        elif args.command == "master-resolve":
+            result = service.resolve_master_data(
+                args.register, args.on)
+        elif args.command == "rates-in-force":
+            result = service.application_rates_in_force(args.on)
+        elif args.command == "verify-master":
+            result = service.verify_master_data()
+        elif args.command == "webhook-register":
+            result = service.register_webhook(
+                args.integration, args.endpoint,
+                [e.strip() for e in args.events.split(",")
+                 if e.strip()],
+                args.secret, args.by, args.as_of)
+        elif args.command == "webhooks":
+            result = service.list_webhook_subscriptions()
+        elif args.command == "webhook-dispatch":
+            result = service.dispatch_webhooks(args.as_of)
+        elif args.command == "webhook-set-active":
+            result = service.set_webhook_active(
+                args.subscription_id, args.act, args.actor,
+                args.as_of, args.reason)
+        elif args.command == "webhook-deliveries":
+            result = service.list_webhook_deliveries(
+                subscription_id=args.subscription)
+        elif args.command == "verify-webhooks":
+            result = service.verify_webhooks()
+        elif args.command == "token-issue":
+            result = service.issue_api_token(
+                args.integration,
+                [s.strip() for s in args.scopes.split(",")
+                 if s.strip()],
+                args.by, args.at, args.secret)
+        elif args.command == "tokens":
+            result = service.list_api_tokens()
+        elif args.command == "token-revoke":
+            result = service.revoke_api_token(
+                args.token_id, args.actor, args.as_of,
+                args.reason)
+        elif args.command == "token-read":
+            result = service.api_token_read(
+                args.token, args.kind, args.target, args.at)
+        elif args.command == "token-decisions":
+            result = service.list_token_decisions()
+        elif args.command == "verify-tokens":
+            result = service.verify_api_tokens()
+        elif args.command == "exchange-import":
+            rows = json.loads(
+                Path(args.file).read_text(encoding="utf-8"))
+            result = service.import_exchange_batch(
+                args.port, rows, args.loaded_by, args.as_of)
+        elif args.command == "exchange-batches":
+            result = service.list_exchange_batches(port=args.port)
+        elif args.command == "exchange-feed":
+            result = service.strike_exchange_feed(
+                args.port, args.as_of, args.by)
+        elif args.command == "exchange-feeds":
+            result = service.list_exchange_feeds(port=args.port)
+        elif args.command == "verify-exchange":
+            result = service.verify_exchange()
+        elif args.command == "verify-integration":
+            result = service.verify_integration()
         else:  # pragma: no cover - argparse enforces the choices
             return 2
     except BriefRefused as exc:

@@ -288,6 +288,88 @@ class MonitoringBoardRequest(BaseModel):
     as_of: str
 
 
+class PackConfigSeedRequest(BaseModel):
+    family: str
+    editor: str
+    struck_on: str
+
+
+class PackConfigVersionRequest(BaseModel):
+    family: str
+    values: dict
+    effective_from: str
+    editor: str
+    struck_on: str
+
+
+class MasterSeedRequest(BaseModel):
+    register: str
+    editor: str
+    struck_on: str
+
+
+class MasterVersionRequest(BaseModel):
+    register: str
+    content: dict
+    effective_from: str
+    editor: str
+    struck_on: str
+
+
+class WebhookSubscriptionRequest(BaseModel):
+    integration: str
+    endpoint: str
+    event_kinds: list[str]
+    secret: str
+    registered_by: str
+    as_of: str
+
+
+class WebhookControlRequest(BaseModel):
+    act: str
+    actor: str
+    as_of: str
+    reason: str | None = None
+
+
+class WebhookDispatchRequest(BaseModel):
+    as_of: str
+
+
+class ApiTokenRequest(BaseModel):
+    integration: str
+    scopes: list[str]
+    issued_by: str
+    issued_at: str
+    secret: str | None = None
+
+
+class ApiTokenRevokeRequest(BaseModel):
+    actor: str
+    as_of: str
+    reason: str | None = None
+
+
+class TokenReadRequest(BaseModel):
+    token: str
+    kind: str
+    target: str
+    at: str
+
+
+class ExchangeBatchRequest(BaseModel):
+    port: str
+    rows: list
+    loaded_by: str
+    as_of: str
+
+
+class ExchangeFeedRequest(BaseModel):
+    port: str
+    as_of: str
+    struck_by: str
+
+
 class PackRequest(BaseModel):
     pack_kind: str
     pack_key: str
@@ -2044,6 +2126,176 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/monitoring/verify")
     def verify_monitoring(as_of: str) -> dict:
         return service.verify_monitoring(as_of)
+
+    # -- admin configuration & master data (R19) ---------
+
+    @app.post("/pack-config/seed")
+    def seed_pack_config(body: PackConfigSeedRequest) -> dict:
+        return service.seed_pack_config(
+            body.family, body.editor, body.struck_on)
+
+    @app.post("/pack-config/versions")
+    def set_pack_config(body: PackConfigVersionRequest) -> dict:
+        return service.set_pack_config(
+            body.family, body.values, body.effective_from,
+            body.editor, body.struck_on)
+
+    @app.get("/pack-config/versions")
+    def list_pack_config_versions(
+        family: str | None = None,
+    ) -> list[dict]:
+        return service.list_pack_config_versions(family=family)
+
+    @app.get("/pack-config/resolve")
+    def resolve_pack_config(family: str, on: str) -> dict:
+        return service.resolve_pack_config(family, on)
+
+    @app.get("/pack-config/verify")
+    def verify_pack_config() -> dict:
+        return service.verify_pack_config()
+
+    @app.post("/master-data/seed")
+    def seed_master_register(body: MasterSeedRequest) -> dict:
+        return service.seed_master_register(
+            body.register, body.editor, body.struck_on)
+
+    @app.post("/master-data/versions")
+    def set_master_version(body: MasterVersionRequest) -> dict:
+        return service.set_master_version(
+            body.register, body.content, body.effective_from,
+            body.editor, body.struck_on)
+
+    @app.get("/master-data/versions")
+    def list_master_data_versions(
+        register: str | None = None,
+    ) -> list[dict]:
+        return service.list_master_data_versions(register=register)
+
+    @app.get("/master-data/resolve")
+    def resolve_master_data(register: str, on: str) -> dict:
+        return service.resolve_master_data(register, on)
+
+    @app.get("/master-data/rates")
+    def application_rates_in_force(on: str) -> dict:
+        return service.application_rates_in_force(on)
+
+    @app.get("/master-data/verify")
+    def verify_master_data() -> dict:
+        return service.verify_master_data()
+
+    # -- webhooks, tokens & exchange ports (R19) ---------
+
+    @app.post("/webhooks")
+    def register_webhook(body: WebhookSubscriptionRequest) -> dict:
+        return service.register_webhook(
+            body.integration, body.endpoint, body.event_kinds,
+            body.secret, body.registered_by, body.as_of)
+
+    @app.get("/webhooks")
+    def list_webhook_subscriptions() -> list[dict]:
+        return service.list_webhook_subscriptions()
+
+    @app.get("/webhooks/{subscription_id}")
+    def get_webhook_subscription(subscription_id: str) -> dict:
+        row = service.get_webhook_subscription(subscription_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such webhook subscription: "
+                       f"{subscription_id}")
+        return row
+
+    @app.post("/webhooks/{subscription_id}/controls")
+    def set_webhook_active(
+        subscription_id: str, body: WebhookControlRequest,
+    ) -> dict:
+        return service.set_webhook_active(
+            subscription_id, body.act, body.actor, body.as_of,
+            body.reason)
+
+    @app.post("/webhooks/dispatch")
+    def dispatch_webhooks(body: WebhookDispatchRequest) -> dict:
+        return service.dispatch_webhooks(body.as_of)
+
+    @app.get("/webhook-deliveries")
+    def list_webhook_deliveries(
+        subscription_id: str | None = None,
+    ) -> list[dict]:
+        return service.list_webhook_deliveries(
+            subscription_id=subscription_id)
+
+    @app.get("/webhooks/verify")
+    def verify_webhooks() -> dict:
+        return service.verify_webhooks()
+
+    @app.post("/api-tokens")
+    def issue_api_token(body: ApiTokenRequest) -> dict:
+        return service.issue_api_token(
+            body.integration, body.scopes, body.issued_by,
+            body.issued_at, body.secret)
+
+    @app.get("/api-tokens")
+    def list_api_tokens() -> list[dict]:
+        return service.list_api_tokens()
+
+    @app.post("/api-tokens/{token_id}/revoke")
+    def revoke_api_token(
+        token_id: str, body: ApiTokenRevokeRequest,
+    ) -> dict:
+        return service.revoke_api_token(
+            token_id, body.actor, body.as_of, body.reason)
+
+    @app.post("/token-reads")
+    def api_token_read(body: TokenReadRequest) -> dict:
+        return service.api_token_read(
+            body.token, body.kind, body.target, body.at)
+
+    @app.get("/token-decisions")
+    def list_token_decisions() -> list[dict]:
+        return service.list_token_decisions()
+
+    @app.get("/api-tokens/verify")
+    def verify_api_tokens() -> dict:
+        return service.verify_api_tokens()
+
+    @app.post("/exchange/batches")
+    def import_exchange_batch(body: ExchangeBatchRequest) -> dict:
+        return service.import_exchange_batch(
+            body.port, body.rows, body.loaded_by, body.as_of)
+
+    @app.get("/exchange/batches")
+    def list_exchange_batches(
+        port: str | None = None,
+    ) -> list[dict]:
+        return service.list_exchange_batches(port=port)
+
+    @app.get("/exchange/batches/{batch_id}")
+    def get_exchange_batch(batch_id: str) -> dict:
+        row = service.get_exchange_batch(batch_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"no such exchange batch: {batch_id}")
+        return row
+
+    @app.post("/exchange/feeds")
+    def strike_exchange_feed(body: ExchangeFeedRequest) -> dict:
+        return service.strike_exchange_feed(
+            body.port, body.as_of, body.struck_by)
+
+    @app.get("/exchange/feeds")
+    def list_exchange_feeds(
+        port: str | None = None,
+    ) -> list[dict]:
+        return service.list_exchange_feeds(port=port)
+
+    @app.get("/exchange/verify")
+    def verify_exchange() -> dict:
+        return service.verify_exchange()
+
+    @app.get("/integration/verify")
+    def verify_integration() -> dict:
+        return service.verify_integration()
 
     return app
 
