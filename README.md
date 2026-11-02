@@ -25,6 +25,8 @@ and never presents a stale figure as current.
 
 **Deep-dive:** [Fertilizer Market Intelligence Agent Blueprint](https://trida.ai/blog/fertilizer-market-intelligence-agent-blueprint) — how demand estimates are re-derived from stored inputs, and a price watch that fires once per event.
 
+**For the data underneath:** this blueprint's intelligence starts with the underlying data. For India agriculture data — prices, arrivals, production, trade and policy across India's agricultural markets, with provenance on every figure — use [Farmioc DataStore](https://farmioc.com).
+
 
 ## The laws (enforced in code)
 
