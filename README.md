@@ -21,6 +21,11 @@ and never presents a stale figure as current.
 
 > **Work in progress** — this blueprint is built and passing its automated test and eval gates, but it has not yet finished hands-on local testing, and its companion blog post is not yet published. Expect changes. This notice comes off when both are done.
 
+<p><a href="https://trida.ai/blog/fertilizer-market-intelligence-agent-blueprint"><img src="https://geeytzpdwvjojoie.public.blob.vercel-storage.com/blog/1793597518697-cover.webp" alt="Fertilizer Market Intelligence Agent Blueprint" width="600"></a></p>
+
+**Deep-dive:** [Fertilizer Market Intelligence Agent Blueprint](https://trida.ai/blog/fertilizer-market-intelligence-agent-blueprint) — how demand estimates are re-derived from stored inputs, and a price watch that fires once per event.
+
+
 ## The laws (enforced in code)
 
 1. **Every number is computed in code from stored data** — demand
